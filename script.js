@@ -412,7 +412,7 @@ titleStartBtn.addEventListener('click', () => {
  showOverlay(
   '¡ATENCIÓN!',
   `
-  Los invasores quieren robarse nuestra información,<br>
+  Los invasores quieren robarse nuestra información.<br>
   <strong>¡No podemos permitirlo!</strong>
 
   <br><br><br>
