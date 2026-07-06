@@ -189,6 +189,7 @@ const highscoreLiveScoreEl = document.getElementById('highscore-live-score');
 const viewPodiumBtn = document.getElementById('view-podium-btn');
 const podiumModal = document.getElementById('podium-modal');
 const podiumHomeBtn = document.getElementById('podium-home-btn');
+const podiumResetBtn = document.getElementById('podium-reset-btn');
 const podiumEls = {
   1: { name: document.querySelector('#podium-1 .podium-name'), score: document.querySelector('#podium-1 .podium-score') },
   2: { name: document.querySelector('#podium-2 .podium-name'), score: document.querySelector('#podium-2 .podium-score') },
@@ -208,24 +209,89 @@ let currentPlayerName = 'JUGADOR';
 let aiPredictedScore = null;
 let predictionToken = 0;
 
-// ---------- HIGH SCORES (persisten en el navegador con localStorage) ----------
+// ---------- HIGH SCORES (tabla compartida, vive en el servidor) ----------
+// Antes vivían solo en la memoria del navegador (se perdían al
+// recargar y cada compu tenía la suya). Ahora se guardan en una base
+// de datos compartida (ver api/scores.js), así que TODAS las
+// computadoras conectadas a internet ven la MISMA tabla: si el
+// jugador 1 hace un puntaje en una compu, el jugador 2 lo ve en la
+// suya (se actualiza solo cada un ratito, sin tener que recargar).
 const HIGHSCORE_MAX = 8;
+const SCORES_REFRESH_MS = 15000; // cada cuánto se refresca sola en segundo plano
 
-// Ya NO se guarda en localStorage: vive solo en esta variable, en
-// memoria. Al recargar la página, se pierde y arranca vacía de nuevo.
+// Copia local de la última tabla que se pudo traer del servidor. Se
+// usa para dibujar al toque (sin esperar la red) y como respaldo si en
+// algún momento falla el pedido (así nunca se ve una pantalla rota).
 let highScoresMemory = [];
 
 function loadHighScores() {
   return highScoresMemory;
 }
 
-function addHighScore(name, score) {
-  const list = loadHighScores();
+// Trae la tabla posta desde el servidor y redibuja. Se llama al
+// arrancar la página, cada vez que se guarda un puntaje, al abrir el
+// podio, y solita cada SCORES_REFRESH_MS mientras la página esté
+// abierta.
+async function refreshHighScores() {
+  try {
+    const res = await fetch(`/api/scores?limit=${HIGHSCORE_MAX}`);
+    if (!res.ok) throw new Error('bad response');
+    const data = await res.json();
+    if (Array.isArray(data.scores)) {
+      highScoresMemory = data.scores;
+      renderHighScoreSidebar();
+      if (podiumModal.classList.contains('show')) renderPodium();
+    }
+  } catch (err) {
+    // silencioso a propósito: si falla, se sigue viendo la última
+    // tabla que se pudo traer (o "sin puntajes todavía" si es la
+    // primera vez y todavía no hay red)
+  }
+}
+
+// Guarda un puntaje nuevo en el servidor (queda visible para todas las
+// computadoras) y de paso refresca la tabla local. No bloquea nada: si
+// falla la red, el jugador igual sigue jugando normal, simplemente ese
+// puntaje puntual no quedó guardado en la tabla compartida.
+async function addHighScore(name, score) {
   const cleanName = (name || 'JUGADOR').toUpperCase().slice(0, 12);
-  list.push({ name: cleanName, score });
-  list.sort((a, b) => b.score - a.score);
-  highScoresMemory = list.slice(0, HIGHSCORE_MAX);
-  renderHighScoreSidebar();
+  try {
+    await fetch('/api/scores', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: cleanName, score }),
+    });
+  } catch (err) {
+    // silencioso a propósito
+  }
+  refreshHighScores();
+}
+
+// Botón de "REINICIAR" del podio: borra TODA la tabla compartida (para
+// todas las computadoras). Pide una clave para evitar que cualquiera
+// la borre por accidente o de joda; esa clave se configura en Vercel
+// como variable de entorno SCORES_RESET_SECRET.
+async function resetHighScoresOnline() {
+  const secret = window.prompt('Clave para reiniciar los puntajes de TODAS las computadoras:');
+  if (secret === null) return; // canceló
+  try {
+    const res = await fetch('/api/scores', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'reset', secret }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'No se pudo reiniciar la tabla.');
+      return;
+    }
+    highScoresMemory = [];
+    renderHighScoreSidebar();
+    renderPodium();
+    alert('Listo, se reinició la tabla de puntajes en todas las computadoras.');
+  } catch (err) {
+    alert('No se pudo conectar para reiniciar la tabla.');
+  }
 }
 
 function escapeHtml(str) {
@@ -235,8 +301,8 @@ function escapeHtml(str) {
 }
 
 // Dibuja la tabla de puntajes en el panel de la izquierda (como estaba).
-// Se llama al arrancar la página y cada vez que se guarda un puntaje
-// nuevo, así siempre está actualizada.
+// Se llama al arrancar la página y cada vez que se refresca la tabla
+// compartida, así siempre se ve lo último que se pudo traer.
 function renderHighScoreSidebar() {
   const list = loadHighScores();
   highscoreListEl.innerHTML = '';
@@ -274,6 +340,7 @@ let podiumShouldResumeGame = false;
 
 function openPodiumModal() {
   renderPodium();
+  refreshHighScores(); // trae lo último de las otras computadoras al toque, no espera al refresco automático
   podiumShouldResumeGame = false;
   if (state && state.running && !state.paused) {
     state.paused = true;
@@ -297,6 +364,7 @@ const hudScoreBtn = document.getElementById('hud-score-btn');
 if (hudScoreBtn) hudScoreBtn.addEventListener('click', openPodiumModal);
 
 podiumHomeBtn.addEventListener('click', closePodiumModal);
+if (podiumResetBtn) podiumResetBtn.addEventListener('click', resetHighScoresOnline);
 
 // Botón "INICIO" del modal del podio: cierra el modal (sin reanudar la
 // partida, ya que nos vamos a la pantalla de título) y lleva directo a
@@ -433,7 +501,7 @@ titleStartBtn.addEventListener('click', () => {
 
   <br><br>
 
-  Flechas <b>← →</b> para moverte,<br>
+  Flechas <b>← → ↑ ↓</b> para moverte,<br>
   <b>ESPACIO</b> para disparar.
   `,
   'JUGAR',
@@ -979,6 +1047,14 @@ function updatePlayer(dt) {
   if (state.keys['ArrowLeft'] || state.keys['KeyA'])  p.x -= speed;
   if (state.keys['ArrowRight'] || state.keys['KeyD']) p.x += speed;
   p.x = clamp(p.x, 8, CONFIG.canvasW - p.w - 8);
+
+  // Movimiento vertical (además del horizontal de siempre): la nave se
+  // puede mover hacia arriba/abajo dentro de la mitad inferior de la
+  // pantalla, sin meterse en la zona de la formación de abejas (o del
+  // jefe), para no romper el balance del juego.
+  if (state.keys['ArrowUp'] || state.keys['KeyW'])   p.y -= speed;
+  if (state.keys['ArrowDown'] || state.keys['KeyS']) p.y += speed;
+  p.y = clamp(p.y, CONFIG.canvasH * 0.5, CONFIG.canvasH - p.h - 8);
 
   p.shootCooldown -= dt;
   if ((state.keys['Space']) && p.shootCooldown <= 0) {
@@ -1815,7 +1891,7 @@ function spawnFinalExplosion(x, y) {
 // que se disparan en todas direcciones y se apagan solas ----
 // ---- Explosión GIGANTE del jefe final: un millón de pedazos de colores ----
 function spawnBossExplosion(x, y) {
-  const colors = ['#fff126', '#ffffff', '#79f017', '#ff1ba0', '#ffffff', '#ff3d81', '#b6ff3d', '#ebf83a'];
+  const colors = ['#fff', '#ffd23f', '#ff9d3d', '#ff3d3d', '#4dfff0', '#ff3d81', '#b6ff3d', '#ffe066'];
   for (let i = 0; i < 220; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 80 + Math.random() * 520;
@@ -1833,7 +1909,7 @@ function spawnBossExplosion(x, y) {
 }
 
 function spawnExplosion(x, y) {
-  const colors = ['#fff', '#ffd23f', '#ff8f1f', '#ff0000'];
+  const colors = ['#fff', '#ffd23f', '#ff9d3d', '#ff3d3d'];
   for (let i = 0; i < 22; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 60 + Math.random() * 160;
@@ -2009,7 +2085,7 @@ function gameOver(won) {
   playCrtTransition(() => {
     showOverlay(
       won ? '¡FORMACIÓN DESTRUIDA!' : 'GAME OVER',
-      `${resultLine}<br>¡Buen juego, ${escapeHtml(currentPlayerName)}!`,
+      `${resultLine}<br>¡Buen juego, ${escapeHtml(currentPlayerName)}! Tu puntaje se guarda en la tabla.`,
       'GUARDAR Y JUGAR DE NUEVO'
     );
     state.pendingScoreSave = true;
@@ -2507,6 +2583,8 @@ function loop(now) {
 
 // ---------- 8. ARRANQUE ----------
 showTitleScreen();  // arranca en la pantalla de título, con la demo jugando sola detrás
+refreshHighScores(); // trae la tabla real del servidor apenas carga (arriba se pintó la caché vacía/vieja primero para no bloquear)
+setInterval(refreshHighScores, SCORES_REFRESH_MS); // y se sigue actualizando sola, para ver puntajes hechos en OTRAS computadoras
 requestAnimationFrame(loop);
 
 // ---------- 9. RESPONSIVE: escalar el gabinete para que entre en pantallas chicas ----------
@@ -2596,10 +2674,10 @@ if (isTouchDevice) {
   bindHoldButton(document.getElementById('btn-fire'), 'Space');
 
   // Joystick: todo el drag se escucha sobre la base circular (el knob
-  // tiene pointer-events:none, así que siempre "gana" la base). Solo
-  // nos importa el desplazamiento horizontal del dedo respecto del
-  // centro: pasado un umbral, prende ArrowLeft o ArrowRight — el mismo
-  // flag que ya usa el teclado.
+  // tiene pointer-events:none, así que siempre "gana" la base). Ahora
+  // es de 4 direcciones: según hacia dónde se mueva el dedo respecto
+  // del centro, prende ArrowLeft/Right/Up/Down — los mismos flags que
+  // ya usa el teclado.
   function bindJoystick(baseEl, knobEl) {
     const maxDist = 32;   // recorrido visual máximo del knob (px)
     const deadzone = 4;   // umbral mínimo antes de mover (chico a propósito:
@@ -2609,12 +2687,15 @@ if (isTouchDevice) {
                            // como "lag" al cambiar de dirección).
     let activePointerId = null;
     let originX = 0;
+    let originY = 0;
 
-    function applyKnob(dx) {
-      knobEl.style.transform = `translate(${dx}px, 0px)`;
+    function applyKnob(dx, dy) {
+      knobEl.style.transform = `translate(${dx}px, ${dy}px)`;
       if (state) {
         state.keys['ArrowLeft'] = dx < -deadzone;
         state.keys['ArrowRight'] = dx > deadzone;
+        state.keys['ArrowUp'] = dy < -deadzone;
+        state.keys['ArrowDown'] = dy > deadzone;
       }
     }
 
@@ -2623,7 +2704,18 @@ if (isTouchDevice) {
       if (state) {
         state.keys['ArrowLeft'] = false;
         state.keys['ArrowRight'] = false;
+        state.keys['ArrowUp'] = false;
+        state.keys['ArrowDown'] = false;
       }
+    }
+
+    // Clamp circular (no cuadrado): así el recorrido máximo del knob es
+    // igual en cualquier dirección, se siente parejo en diagonales.
+    function clampVector(dx, dy) {
+      const dist = Math.hypot(dx, dy);
+      if (dist <= maxDist || dist === 0) return { x: dx, y: dy };
+      const ratio = maxDist / dist;
+      return { x: dx * ratio, y: dy * ratio };
     }
 
     function onDown(e) {
@@ -2631,16 +2723,17 @@ if (isTouchDevice) {
       activePointerId = e.pointerId;
       baseEl.classList.add('pressed');
       baseEl.setPointerCapture(e.pointerId);
-      originX = baseEl.getBoundingClientRect().left + baseEl.getBoundingClientRect().width / 2;
-      applyKnob(clampDx(e.clientX - originX));
-    }
-    function clampDx(dx) {
-      return Math.max(-maxDist, Math.min(maxDist, dx));
+      const rect = baseEl.getBoundingClientRect();
+      originX = rect.left + rect.width / 2;
+      originY = rect.top + rect.height / 2;
+      const v = clampVector(e.clientX - originX, e.clientY - originY);
+      applyKnob(v.x, v.y);
     }
     function onMove(e) {
       if (activePointerId !== e.pointerId) return;
       e.preventDefault();
-      applyKnob(clampDx(e.clientX - originX));
+      const v = clampVector(e.clientX - originX, e.clientY - originY);
+      applyKnob(v.x, v.y);
     }
     function onUp(e) {
       if (activePointerId !== e.pointerId) return;
