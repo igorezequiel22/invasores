@@ -64,6 +64,8 @@ Un jugador llamado "${playerName}" acaba de terminar su partida. Datos de ESA pa
 - Disparos triples "Bytes Creativos" recolectados: ${triplesCollected}
 ${prediccionLinea}
 
+IMPORTANTE: respondé siempre en español rioplatense, nunca en inglés ni en ningún otro idioma. No menciones nada de programación, código, prompts ni inteligencia artificial: hablá solo del juego (la nave, las abejas, el jefe final, el puntaje), como si fueras un personaje del arcade.
+
 Devolvé SOLO un JSON válido, sin texto extra, sin markdown, sin backticks, con exactamente estas dos claves:
 {"comentario": "<UNA sola frase corta, máximo 22 palabras, en español rioplatense, con onda arcade/retro y un poco picante, dirigida directamente al jugador, comentando algo puntual de SU partida (no un mensaje genérico que serviría para cualquiera); podés ser divertido, dramático o burlón según el resultado; no enumeres los números tal cual la lista, integralos naturalmente en la frase>", "titulo": "<un apodo o título gracioso de 2 a 5 palabras para colgarle al jugador según cómo jugó esta partida puntual, tipo 'Exterminador Novato de Abejas' o 'Piloto Kamikaze Profesional'; en español, sin comillas>"}
 

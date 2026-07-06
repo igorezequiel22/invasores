@@ -32,7 +32,7 @@ El jugador que está por arrancar se llama "${playerName}". Todavía no jugó na
 Devolvé SOLO un JSON válido, sin texto extra, sin markdown, sin backticks, con exactamente estas dos claves:
 {"predictedScore": <número entero entre 800 y 6000, en onda arcade>, "line": "<una frase cortita, máximo 18 palabras, en español rioplatense, con onda arcade/retro, retadora, dirigida a ${playerName}, que mencione ese mismo número de puntos predichos>"}
 
-El campo "line" tiene que integrar el número de predictedScore de forma natural (por ejemplo con la idea de "la máquina cree que vas a hacer X puntos"). No uses comillas dentro del texto de "line" ni emojis.`;
+El campo "line" tiene que integrar el número de predictedScore de forma natural (por ejemplo con la idea de "la máquina cree que vas a hacer X puntos"). SIEMPRE en español rioplatense, nunca en inglés ni en ningún otro idioma. No menciones programación, código ni inteligencia artificial: hablá solo del juego y del puntaje. No uses comillas dentro del texto de "line" ni emojis.`;
 
   try {
     const controller = new AbortController();

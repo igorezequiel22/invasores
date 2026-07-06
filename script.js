@@ -1291,12 +1291,47 @@ function spawnBoss() {
   requestBossTaunt('appear');
 }
 
+// Frases de reserva, siempre en español y referidas solo al juego,
+// por si el pedido a la IA falla, tarda de más, o devuelve algo vacío.
+// Así el cartelito del jefe NUNCA aparece vacío/negro: se muestra esta
+// frase al toque y, si la IA contesta a tiempo con algo mejor, la
+// reemplaza.
+const BOSS_TAUNT_FALLBACKS = {
+  appear: [
+    'Creen que le van a ganar a la colmena real?',
+    'Esto recién empieza, pichones.',
+    'Vinieron a jugar o a perder el tiempo?',
+    'Vas a conocer a la verdadera reina.',
+  ],
+  lowhealth: [
+    'Esto no estaba en el plan...',
+    'Todavía no gané, pero tampoco perdí.',
+    'Un par de golpes no me tumban.',
+    'Ah, con que en serio venías.',
+  ],
+  laugh: [
+    'Jajaja, otra nave menos.',
+    'Quedate en el piso, pichón.',
+    'Ese ruidito es mi favorito.',
+    'Una vida menos, campeón.',
+  ],
+};
+
+function pickBossTauntFallback(phase) {
+  const list = BOSS_TAUNT_FALLBACKS[phase] || BOSS_TAUNT_FALLBACKS.appear;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 // Pide una frase de provocación del jefe (texto, sin voz) para
 // mostrar en pantalla mientras se sigue jugando: no pausa nada, no
-// agrega tiempo de partida. Si falla o tarda de más, simplemente no
-// aparece nada, igual que el resto de los pedidos a la IA en este
-// juego.
+// agrega tiempo de partida. Muestra al toque una frase de reserva
+// (siempre en español, siempre sobre el juego) y, si la IA contesta a
+// tiempo con algo válido, la reemplaza por la generada.
 function requestBossTaunt(phase) {
+  if (!state || !state.bossPhase) return;
+  state.bossTaunt.text = pickBossTauntFallback(phase);
+  state.bossTaunt.timer = CONFIG.boss.tauntDuration;
+
   const scoreAtRequest = state.score;
   (async () => {
     try {
@@ -1311,15 +1346,18 @@ function requestBossTaunt(phase) {
       clearTimeout(timeoutId);
       if (!res.ok) throw new Error('bad response');
       const data = await res.json();
+      const taunt = (data && typeof data.taunt === 'string') ? data.taunt.trim() : '';
       // Si para cuando llega la respuesta ya se terminó la pelea (o la
       // partida), no la mostramos: no tiene sentido pisada arriba de
-      // otra pantalla.
-      if (data && data.taunt && state && state.bossPhase) {
-        state.bossTaunt.text = data.taunt;
+      // otra pantalla. Tampoco si vino vacía/muy corta: nos quedamos
+      // con la frase de reserva que ya se ve.
+      if (taunt.length > 2 && state && state.bossPhase) {
+        state.bossTaunt.text = taunt;
         state.bossTaunt.timer = CONFIG.boss.tauntDuration;
       }
     } catch (err) {
-      // silencioso a propósito: nunca bloquea ni rompe la pelea
+      // silencioso a propósito: ya se ve la frase de reserva, nunca
+      // bloquea ni rompe la pelea
     }
   })();
 }
@@ -1640,6 +1678,10 @@ function loseLife() {
     spawnFinalExplosion(p.x + p.w / 2, p.y + p.h / 2);
   } else {
     spawnExplosion(p.x + p.w / 2, p.y + p.h / 2);
+  }
+  // Si te matan justo durante la pelea contra el jefe, se ríe de vos.
+  if (state.bossPhase) {
+    requestBossTaunt('laugh');
   }
   p.alive = false;
   p.blinkTimer = 1.2;

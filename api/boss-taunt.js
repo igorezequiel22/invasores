@@ -22,20 +22,22 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  const phase = body.phase === 'lowhealth' ? 'lowhealth' : 'appear';
+  const phase = ['lowhealth', 'laugh'].includes(body.phase) ? body.phase : 'appear';
   const score = Number(body.score) || 0;
   const playerNameRaw = typeof body.playerName === 'string' ? body.playerName : 'JUGADOR';
   const playerName = playerNameRaw.slice(0, 20);
 
   const situacion = phase === 'lowhealth'
     ? 'Al jefe le queda MUY POCA vida (está a punto de explotar). Está desesperado pero sigue haciéndose el guapo/provocador, quizás algo nervioso.'
+    : phase === 'laugh'
+    ? 'El jugador ACABA de perder una vida (su nave explotó). El jefe se está riendo y burlando de él en el momento, disfrutando el golpe.'
     : 'El jefe recién apareció, está entero, quiere intimidar al jugador antes de que empiece la pelea de verdad.';
 
   const prompt = `Sos la abeja jefa final ("jefe de nivel") de "INVASORES", un jueguito arcade estilo Galaga hecho por el estudio "Bytes Creativos" para un evento presencial.
 
 Un jugador llamado "${playerName}" (puntaje acumulado hasta ahora: ${score}) está peleando contra vos, el jefe. Situación puntual: ${situacion}
 
-Escribí UNA sola frase de provocación bien cortita (máximo 12 palabras), en español rioplatense, con onda villano arcade retro, dirigida directamente al jugador. Nada de comillas ni emojis. Respondé solo con la frase, nada más, sin explicaciones.`;
+Escribí UNA sola frase de provocación bien filosa y con personalidad (entre 6 y 14 palabras), SIEMPRE en español rioplatense (nunca en inglés ni en ningún otro idioma), con onda villano arcade retro. Dirigida directamente al jugador, hablando solo del juego (la pelea, la nave, las abejas, el puntaje): nunca menciones programación, código, inteligencia artificial ni nada técnico, vos sos un personaje del juego. Nada de comillas ni emojis. Respondé solo con la frase final ya completa (nunca la cortes a la mitad), sin explicaciones ni introducciones.`;
 
   try {
     const controller = new AbortController();
@@ -49,7 +51,7 @@ Escribí UNA sola frase de provocación bien cortita (máximo 12 palabras), en e
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 40 },
+        generationConfig: { maxOutputTokens: 70 },
       }),
       signal: controller.signal,
     });
