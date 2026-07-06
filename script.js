@@ -1338,41 +1338,57 @@ function spawnBoss() {
 const BOSS_TAUNT_FALLBACKS = {
   appear: [
     'Che, ¿en serio pensaste que esto iba a ser fácil?',
-    'Bienvenido a mi oficina, pichón.',
+    'Vamo las abejas, {name}. Esto ya está.',
+    'Soy la Messi de las abejas, {name}.',
     'Relajate que esto recién arranca.',
     'A ver si aguantás el ritmo, campeón.',
+    '¿Quién te enseñó a jugar, {name}?',
   ],
   idle: [
-    'Todo bien por ahí, piloto?',
+    'Todo bien por ahí, {name}?',
     'Che, esto está tranqui todavía...',
     'No te apures que no me voy a ningún lado.',
     'Estoy re cómoda acá arriba, ¿eh?',
     'Dale, mostrame algo mejor.',
     'Un embole esta pelea, la verdad.',
+    'Mi abuela juega mejor que vos, {name}.',
+    'Esto es más flojo que un capítulo repetido.',
   ],
   lowhealth: [
     'Bueno, esto no lo tenía en los planes...',
     'Ni ahí me vas a tumbar tan fácil.',
     'Un par de golpes no me bajan del todo.',
-    'Ah mirá, con que venías en serio.',
+    'Ah mirá, con que venías en serio, {name}.',
   ],
   laugh: [
     'Jaja, otra nave menos, tranqui.',
     'Quedate ahí en el piso, campeón.',
     'Una vida menos, así nomás.',
     'Ese ruidito de explosión es una masa.',
+    'Nos vimos, {name}.',
+    'Adiosito.',
+    'Bay bay.',
+    'Abeja 1, {name} 0.',
   ],
   laughcaps: [
-    'JAJAJAJAJA TE REVENTÉ, CAMPEÓN',
-    'JAJAJA CAÍSTE COMO PICHÓN',
+    'JAJAJAJAJA TE LA RE PUSE, {NAME}',
+    'JAJAJA NO PODÉS VENCERME',
+    'JAJAJAJA ABEJA 1, {NAME} 0',
+    'JAJAJAJA NOS VIMOS, CRAQUE',
+    'JAJAJA BAY BAY, {NAME}',
     'JAJAJAJA ESO TE PASA POR VENIR SOLO',
-    'JAJAJAJA OTRA NAVE A LA BASURA',
   ],
 };
 
+function fillTauntTemplate(template, name) {
+  return template.replace(/\{NAME\}/g, name.toUpperCase()).replace(/\{name\}/g, name);
+}
+
 function pickBossTauntFallback(phase) {
   const list = BOSS_TAUNT_FALLBACKS[phase] || BOSS_TAUNT_FALLBACKS.appear;
-  return list[Math.floor(Math.random() * list.length)];
+  const template = list[Math.floor(Math.random() * list.length)];
+  const name = currentPlayerName || 'PILOTO';
+  return fillTauntTemplate(template, name);
 }
 
 // Pide una frase de provocación del jefe (texto, sin voz) para
@@ -2390,13 +2406,13 @@ function wrapCanvasText(text, maxWidth) {
   return lines;
 }
 
-// Frase de provocación del jefe final: texto (sin voz, para que se
-// entienda igual aunque no se escuche el audio del estand). Flota al
-// costado de la abeja jefa, como un globo de diálogo con una colita
-// que apunta hacia ella, para que quede clarísimo que es ELLA la que
-// está hablando (y no un cartel suelto en una esquina). Cuando es la
-// risa burlona en mayúsculas (te mató con su propia bala), se dibuja
-// más grande y en rojo/naranja para que se note el sobrador que es.
+// Frase de provocación del jefe final: solo texto (sin burbuja), bien
+// grande y con un contorno oscuro alrededor de las letras para que se
+// lea clarísimo aunque haya abejas/disparos de fondo. Flota al costado
+// de la abeja jefa (izquierda o derecha, según haya más lugar), para
+// que quede claro que es ELLA la que habla. La risa burlona en
+// mayúsculas (te mató con su propia bala) se ve todavía más grande y
+// en rojo/naranja.
 function drawBossTaunt() {
   const t = state.bossTaunt;
   if (!t || t.timer <= 0 || !t.text || !state.boss) return;
@@ -2415,64 +2431,42 @@ function drawBossTaunt() {
 
   ctx.save();
   ctx.font = isLaughCaps
-    ? "bold 13px 'Segoe UI', Arial, sans-serif"
-    : "bold 11px 'Segoe UI', Arial, sans-serif";
-  ctx.textAlign = 'left';
+    ? "bold 18px 'Segoe UI', Arial, sans-serif"
+    : "bold 16px 'Segoe UI', Arial, sans-serif";
   ctx.textBaseline = 'top';
 
-  const maxTextWidth = 150;
+  const maxTextWidth = 175;
   const lines = wrapCanvasText(t.text, maxTextWidth).slice(0, 4);
-  const lineHeight = isLaughCaps ? 16 : 14;
-  const paddingX = 9;
-  const paddingY = 8;
-  const boxW = maxTextWidth + paddingX * 2;
-  const boxH = lines.length * lineHeight + paddingY * 2 - 2;
+  const lineHeight = isLaughCaps ? 21 : 19;
+  const blockH = lines.length * lineHeight;
 
-  // Decide de qué lado del jefe flota el globo: del lado donde haya
+  // Decide de qué lado del jefe flota el texto: del lado donde haya
   // más espacio dentro del canvas, para que nunca se vaya de pantalla.
   const bossCenterX = b.x + b.w / 2;
   const putOnRight = bossCenterX < CONFIG.canvasW / 2;
-  const gap = 14; // separación entre la abeja y el globo
-  const boxX = putOnRight
-    ? clamp(b.x + b.w + gap, 4, CONFIG.canvasW - boxW - 4)
-    : clamp(b.x - gap - boxW, 4, CONFIG.canvasW - boxW - 4);
-  const boxY = clamp(b.y - 6, 4, CONFIG.canvasH - boxH - 4);
+  const gap = 12; // separación entre la abeja y el texto
+  ctx.textAlign = putOnRight ? 'left' : 'right';
+  const textX = putOnRight
+    ? clamp(b.x + b.w + gap, 4, CONFIG.canvasW - 4)
+    : clamp(b.x - gap, 4, CONFIG.canvasW - 4);
+  const textY = clamp(b.y + b.h / 2 - blockH / 2, 4, CONFIG.canvasH - blockH - 4);
 
-  const bgColor = isLaughCaps ? '#2a0508' : '#0a0715';
-  const borderColor = isLaughCaps ? 'rgba(255,90,60,0.65)' : 'rgba(255,225,77,0.35)';
-  const textColor = isLaughCaps ? '#ff6a3d' : '#ffe14d';
-
-  ctx.globalAlpha = alpha * 0.6;
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(boxX, boxY, boxW, boxH);
+  const textColor = isLaughCaps ? '#ff7a45' : '#ffe14d';
 
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = borderColor;
-  ctx.lineWidth = isLaughCaps ? 1.5 : 1;
-  ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxW - 1, boxH - 1);
-
-  // Colita del globo apuntando hacia la abeja jefa.
-  const tailY = clamp(b.y + b.h / 2, boxY + 6, boxY + boxH - 6);
-  ctx.fillStyle = bgColor;
-  ctx.beginPath();
-  if (putOnRight) {
-    ctx.moveTo(boxX, tailY - 6);
-    ctx.lineTo(boxX, tailY + 6);
-    ctx.lineTo(boxX - gap + 2, tailY);
-  } else {
-    ctx.moveTo(boxX + boxW, tailY - 6);
-    ctx.lineTo(boxX + boxW, tailY + 6);
-    ctx.lineTo(boxX + boxW + gap - 2, tailY);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = isLaughCaps ? 4.5 : 4;
+  ctx.strokeStyle = 'rgba(4,2,12,0.92)';
   ctx.fillStyle = textColor;
   ctx.shadowColor = textColor;
-  ctx.shadowBlur = isLaughCaps ? 7 : 5;
+  ctx.shadowBlur = isLaughCaps ? 12 : 8;
+
   lines.forEach((line, i) => {
-    ctx.fillText(line, boxX + paddingX, boxY + paddingY + i * lineHeight);
+    const y = textY + i * lineHeight;
+    // El contorno oscuro primero (se dibuja debajo), después el
+    // relleno de color encima: así se lee bien sobre cualquier fondo.
+    ctx.strokeText(line, textX, y);
+    ctx.fillText(line, textX, y);
   });
   ctx.restore();
 }
