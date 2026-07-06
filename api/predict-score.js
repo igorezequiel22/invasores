@@ -7,7 +7,10 @@
 // para cuando aprieta "JUGAR", sin agregar espera. Devuelve un
 // puntaje "predicho" con onda arcade y una frase para mostrar. El
 // puntaje predicho se guarda en el front-end para compararlo con el
-// puntaje real al terminar la partida.
+// puntaje real al terminar la partida. El front-end YA tiene su propia
+// predicción de reserva en español lista para mostrar de entrada, así
+// que si esta función falla o contesta en otro idioma, el cartelito de
+// predicción igual se ve bien.
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -24,6 +27,8 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const playerNameRaw = typeof body.playerName === 'string' ? body.playerName : 'PILOTO';
   const playerName = playerNameRaw.slice(0, 20);
+
+  const systemInstruction = 'Respondés siempre, sin ninguna excepción, en español rioplatense (de Argentina). Nunca en inglés ni en ningún otro idioma, sin importar en qué idioma esté la consigna. Esto aplica a TODOS los campos del JSON que devolvés.';
 
   const prompt = `Sos "la máquina", el sistema arcade que predice puntajes antes de que un jugador arranque una partida de "INVASORES" (jueguito de nave estilo Galaga del estudio "Bytes Creativos", para un evento presencial donde la gente juega una sola partida rápida).
 
@@ -45,6 +50,7 @@ El campo "line" tiene que integrar el número de predictedScore de forma natural
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemInstruction }] },
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: 120, responseMimeType: 'application/json' },
       }),
@@ -70,8 +76,13 @@ El campo "line" tiene que integrar el número de predictedScore de forma natural
       line = typeof parsed.line === 'string' ? parsed.line.trim() : '';
     } catch (parseErr) {
       // Si por algo la IA no devolvió JSON válido, no rompemos nada:
-      // simplemente no hay predicción para esta partida.
+      // el front-end se queda con su predicción de reserva en español.
     }
+
+    // Chequeo liviano: si por algo se escapó en inglés a pesar de las
+    // instrucciones, no la mandamos (el front-end tiene su propia
+    // predicción de reserva en español lista para ese caso).
+    if (line && !looksSpanish(line)) line = '';
 
     if (!predictedScore || !line) {
       res.status(200).json({ predictedScore: null, line: '' });
@@ -82,4 +93,14 @@ El campo "line" tiene que integrar el número de predictedScore de forma natural
   } catch (err) {
     res.status(500).json({ error: 'No se pudo generar la predicción', detail: String(err) });
   }
+}
+
+// Chequeo rápido y liviano (no es detección "seria" de idioma) para
+// filtrar respuestas que se le escaparon en inglés al modelo.
+const ENGLISH_TELLS = /\b(the|you|your|and|is|are|was|were|this|that|i'm|im|don't|dont|gonna|going|will|can't|cant|what|with|have|has|not|for)\b/gi;
+function looksSpanish(text) {
+  const matches = text.match(ENGLISH_TELLS);
+  if (!matches) return true;
+  const wordCount = text.trim().split(/\s+/).length;
+  return matches.length / wordCount < 0.34;
 }

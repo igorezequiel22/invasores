@@ -138,6 +138,8 @@ const CONFIG = {
     minionCount: 3,          // cuántas abejas chicas suelta cada vez
     tauntDuration: 4.5,       // segundos que se ve en pantalla cada frase del jefe
     lowHealthRatio: 0.75,     // a partir de qué % de impactos recibidos se considera "poca vida" (dispara la 2da frase)
+    tauntIdleMin: 6,          // mientras dura la pelea, cada tanto tira una frase "de aire" (charla suelta), sin esperar solo a golpes/muertes
+    tauntIdleMax: 10,
   },
 
   // Oleadas de picada estilo Galaga: solo bajan estos "elegidos", nunca
@@ -429,6 +431,38 @@ titleStartBtn.addEventListener('click', () => {
   });
 });
 
+// Frases de reserva para la predicción de puntaje (pantalla de
+// instrucciones), por si el pedido a la IA falla, tarda de más, o
+// contesta en un idioma que no es español. Así el cartelito de
+// predicción NUNCA se queda vacío: siempre hay algo en pantalla, y si
+// la IA contesta bien a tiempo, lo reemplaza.
+const PREDICTION_FALLBACK_LINES = [
+  '{name}, la máquina calcula {score} puntos para vos.',
+  'Mi cálculo dice {score} puntos, {name}. A ver si acierto.',
+  '{score} puntos, {name}. Esa es mi apuesta.',
+  'Para {name} preveo {score} puntos. No me hagas quedar mal.',
+  'La máquina va con {score} puntos para {name}.',
+];
+function pickPredictionFallback(name) {
+  const score = 1200 + Math.floor(Math.random() * 3200);
+  const template = PREDICTION_FALLBACK_LINES[Math.floor(Math.random() * PREDICTION_FALLBACK_LINES.length)];
+  const line = template.replace('{name}', name).replace('{score}', score);
+  return { predictedScore: score, line };
+}
+
+// Chequeo rápido y liviano para descartar respuestas de la IA que se
+// escaparon en inglés a pesar de las instrucciones del prompt (se
+// reutiliza el mismo criterio en toda la pantalla de instrucciones y
+// en la de game over).
+const ENGLISH_TELLS = /\b(the|you|your|and|is|are|was|were|this|that|i'm|im|don't|dont|gonna|going|will|can't|cant|what|with|have|has|not|for)\b/gi;
+function looksSpanish(text) {
+  if (!text) return false;
+  const matches = text.match(ENGLISH_TELLS);
+  if (!matches) return true;
+  const wordCount = text.trim().split(/\s+/).length;
+  return matches.length / wordCount < 0.34;
+}
+
 // Pide una predicción de puntaje con onda arcade ANTES de que arranque
 // la partida ("la máquina cree que vas a hacer X puntos..."). Si falla
 // o tarda de más, simplemente no se muestra nada, igual que el resto
@@ -436,11 +470,14 @@ titleStartBtn.addEventListener('click', () => {
 // experiencia en el evento.
 function requestAiPrediction() {
   const myToken = ++predictionToken;
-  aiPredictedScore = null;
-  aiPredictionEl.textContent = '...';
-  aiPredictionEl.classList.add('ai-comment--visible');
-
   const nameForPrediction = titleNameInput.value.trim() || currentPlayerName || 'PILOTO';
+
+  // Se muestra al toque una predicción de reserva (siempre en español)
+  // para que el cartelito nunca se vea vacío ni tarde en aparecer.
+  const fallback = pickPredictionFallback(nameForPrediction);
+  aiPredictedScore = fallback.predictedScore;
+  aiPredictionEl.textContent = fallback.line;
+  aiPredictionEl.classList.add('ai-comment--visible');
 
   (async () => {
     try {
@@ -456,14 +493,14 @@ function requestAiPrediction() {
       if (myToken !== predictionToken) return; // ya se pidió otra más nueva
       if (!res.ok) throw new Error('bad response');
       const data = await res.json();
-      if (data && data.line && data.predictedScore) {
+      if (data && data.line && data.predictedScore && looksSpanish(data.line)) {
         aiPredictionEl.textContent = data.line;
-        aiPredictedScore = Number(data.predictedScore) || null;
-      } else {
-        aiPredictionEl.classList.remove('ai-comment--visible');
+        aiPredictedScore = Number(data.predictedScore) || fallback.predictedScore;
       }
+      // Si vino vacío, incompleto o en otro idioma, se queda la
+      // predicción de reserva que ya se está mostrando.
     } catch (err) {
-      if (myToken === predictionToken) aiPredictionEl.classList.remove('ai-comment--visible');
+      // silencioso a propósito: ya se ve la predicción de reserva
     }
   })();
 }
@@ -624,9 +661,10 @@ function resetGame() {
     bossSpawned: false,        // para no invocarlo dos veces
     bossPhase: false,          // true una vez que empezó la pelea final
     bossAnnounceTimer: 0,      // cartelito "¡JEFE FINAL!" al aparecer
-    bossTaunt: { text: '', timer: 0 },   // frase del jefe que se ve en pantalla (texto, sin voz)
+    bossTaunt: { text: '', timer: 0, kind: 'normal' },   // frase del jefe que se ve en pantalla (texto, sin voz)
     bossTauntAppearRequested: false,     // para pedir la frase de "apareció" una sola vez
     bossTauntLowHealthRequested: false,  // para pedir la frase de "poca vida" una sola vez
+    bossTauntIdleTimer: 0,                // cuenta regresiva para la próxima frase "de aire" del jefe durante la pelea
     victoryDelay: 0,            // espera a que termine la explosión del jefe antes de mostrar VICTORIA
     defeatDelay: 0,              // espera a que termine la explosión final antes de mostrar GAME OVER
     keys: {},
@@ -1288,6 +1326,7 @@ function spawnBoss() {
     shootTimer: cfg.shootInterval,
     shotCount: 0,
   };
+  state.bossTauntIdleTimer = cfg.tauntIdleMin + Math.random() * (cfg.tauntIdleMax - cfg.tauntIdleMin);
   requestBossTaunt('appear');
 }
 
@@ -1298,22 +1337,36 @@ function spawnBoss() {
 // reemplaza.
 const BOSS_TAUNT_FALLBACKS = {
   appear: [
-    'Creen que le van a ganar a la colmena real?',
-    'Esto recién empieza, pichones.',
-    'Vinieron a jugar o a perder el tiempo?',
-    'Vas a conocer a la verdadera reina.',
+    'Che, ¿en serio pensaste que esto iba a ser fácil?',
+    'Bienvenido a mi oficina, pichón.',
+    'Relajate que esto recién arranca.',
+    'A ver si aguantás el ritmo, campeón.',
+  ],
+  idle: [
+    'Todo bien por ahí, piloto?',
+    'Che, esto está tranqui todavía...',
+    'No te apures que no me voy a ningún lado.',
+    'Estoy re cómoda acá arriba, ¿eh?',
+    'Dale, mostrame algo mejor.',
+    'Un embole esta pelea, la verdad.',
   ],
   lowhealth: [
-    'Esto no estaba en el plan...',
-    'Todavía no gané, pero tampoco perdí.',
-    'Un par de golpes no me tumban.',
-    'Ah, con que en serio venías.',
+    'Bueno, esto no lo tenía en los planes...',
+    'Ni ahí me vas a tumbar tan fácil.',
+    'Un par de golpes no me bajan del todo.',
+    'Ah mirá, con que venías en serio.',
   ],
   laugh: [
-    'Jajaja, otra nave menos.',
-    'Quedate en el piso, pichón.',
-    'Ese ruidito es mi favorito.',
-    'Una vida menos, campeón.',
+    'Jaja, otra nave menos, tranqui.',
+    'Quedate ahí en el piso, campeón.',
+    'Una vida menos, así nomás.',
+    'Ese ruidito de explosión es una masa.',
+  ],
+  laughcaps: [
+    'JAJAJAJAJA TE REVENTÉ, CAMPEÓN',
+    'JAJAJA CAÍSTE COMO PICHÓN',
+    'JAJAJAJA ESO TE PASA POR VENIR SOLO',
+    'JAJAJAJA OTRA NAVE A LA BASURA',
   ],
 };
 
@@ -1329,8 +1382,10 @@ function pickBossTauntFallback(phase) {
 // tiempo con algo válido, la reemplaza por la generada.
 function requestBossTaunt(phase) {
   if (!state || !state.bossPhase) return;
+  const kind = phase === 'laughcaps' ? 'laughcaps' : 'normal';
   state.bossTaunt.text = pickBossTauntFallback(phase);
   state.bossTaunt.timer = CONFIG.boss.tauntDuration;
+  state.bossTaunt.kind = kind;
 
   const scoreAtRequest = state.score;
   (async () => {
@@ -1349,11 +1404,12 @@ function requestBossTaunt(phase) {
       const taunt = (data && typeof data.taunt === 'string') ? data.taunt.trim() : '';
       // Si para cuando llega la respuesta ya se terminó la pelea (o la
       // partida), no la mostramos: no tiene sentido pisada arriba de
-      // otra pantalla. Tampoco si vino vacía/muy corta: nos quedamos
-      // con la frase de reserva que ya se ve.
-      if (taunt.length > 2 && state && state.bossPhase) {
+      // otra pantalla. Tampoco si vino vacía/muy corta o no parece
+      // español (nos quedamos con la frase de reserva que ya se ve).
+      if (taunt.length > 2 && looksSpanish(taunt) && state && state.bossPhase) {
         state.bossTaunt.text = taunt;
         state.bossTaunt.timer = CONFIG.boss.tauntDuration;
+        state.bossTaunt.kind = kind;
       }
     } catch (err) {
       // silencioso a propósito: ya se ve la frase de reserva, nunca
@@ -1382,6 +1438,14 @@ function updateBoss(dt) {
   b.x = b.baseX + Math.sin(b.driftPhase) * cfg.hoverRangeX;
   b.x = clamp(b.x, 10, CONFIG.canvasW - b.w - 10);
 
+  // Charla suelta del jefe cada tanto mientras dura la pelea, para que
+  // no se quede mudo si el jugador no le pega ni se muere por un rato.
+  state.bossTauntIdleTimer -= dt;
+  if (state.bossTauntIdleTimer <= 0) {
+    state.bossTauntIdleTimer = cfg.tauntIdleMin + Math.random() * (cfg.tauntIdleMax - cfg.tauntIdleMin);
+    requestBossTaunt('idle');
+  }
+
   // Disparo periódico; cada "minionEvery" disparos, además suelta abejas
   b.shootTimer -= dt;
   if (b.shootTimer <= 0) {
@@ -1391,6 +1455,7 @@ function updateBoss(dt) {
       y: b.y + b.h,
       w: CONFIG.enemyBullet.width,
       h: CONFIG.enemyBullet.height,
+      fromBoss: true, // para saber, si mata al jugador, que fue el jefe y no un minion
     });
     b.shotCount += 1;
     if (b.shotCount % cfg.minionEvery === 0) {
@@ -1636,7 +1701,7 @@ function checkCollisions() {
         if (state.shield.active) {
           spawnShieldSpark(b.x, b.y);
         } else {
-          loseLife();
+          loseLife(!!b.fromBoss);
         }
       }
     }
@@ -1669,7 +1734,7 @@ function checkCollisions() {
   state.enemyBullets = state.enemyBullets.filter(b => !b.hit);
 }
 
-function loseLife() {
+function loseLife(diedFromBossBullet) {
   const p = state.player;
   state.tripleShotActive = false; // si te matan, se pierde el disparo doble
   state.tripleShotTimer = 0;
@@ -1679,9 +1744,11 @@ function loseLife() {
   } else {
     spawnExplosion(p.x + p.w / 2, p.y + p.h / 2);
   }
-  // Si te matan justo durante la pelea contra el jefe, se ríe de vos.
+  // Si te matan durante la pelea contra el jefe, se ríe de vos. Si fue
+  // una bala DEL JEFE la que te tumbó (no un minion ni un choque), se
+  // caga de risa en mayúsculas, bien sobrador.
   if (state.bossPhase) {
-    requestBossTaunt('laugh');
+    requestBossTaunt(diedFromBossBullet ? 'laughcaps' : 'laugh');
   }
   p.alive = false;
   p.blinkTimer = 1.2;
@@ -1934,9 +2001,56 @@ function gameOver(won) {
 // o tarda de más, simplemente no se muestra nada — el resto de la
 // pantalla de GAME OVER ya se ve bien sin esto, así que nunca bloquea
 // ni rompe la experiencia en el evento.
+// Frases y títulos de reserva para la pantalla de GAME OVER, por si el
+// pedido a la IA falla, tarda de más, o contesta en otro idioma. Con
+// esto el comentario y el título NUNCA se quedan mudos ni aparecen en
+// inglés: siempre hay algo en español y, si la IA contesta bien a
+// tiempo, lo reemplaza por su versión (más específica de esa partida).
+const GAMEOVER_COMMENT_FALLBACK_WIN = [
+  'Le hiciste morder el polvo a toda la colmena, campeón.',
+  'La reina se va a acordar de vos por un buen rato.',
+  'Formación destruida y jefe abajo: partidón.',
+  'Ni las abejas más bravas te pudieron parar hoy.',
+];
+const GAMEOVER_COMMENT_FALLBACK_LOSE = [
+  'Las abejas se quedaron con las ganas de más, pero casi.',
+  'Buen intento, piloto, la próxima la sacás.',
+  'La colmena zafó por poco esta vez.',
+  'Diste pelea antes de caer, eso vale.',
+];
+const GAMEOVER_TITLE_FALLBACK_WIN = [
+  'Exterminador de Colmenas',
+  'Piloto Letal',
+  'Verdugo de la Reina',
+  'Terror de las Abejas',
+];
+const GAMEOVER_TITLE_FALLBACK_LOSE = [
+  'Piloto en Entrenamiento',
+  'Carnada de Abejas',
+  'Sobreviviente Tercos',
+  'Casi Casi Campeón',
+];
+function pickGameOverFallback(won) {
+  const comments = won ? GAMEOVER_COMMENT_FALLBACK_WIN : GAMEOVER_COMMENT_FALLBACK_LOSE;
+  const titles = won ? GAMEOVER_TITLE_FALLBACK_WIN : GAMEOVER_TITLE_FALLBACK_LOSE;
+  return {
+    message: comments[Math.floor(Math.random() * comments.length)],
+    title: titles[Math.floor(Math.random() * titles.length)],
+  };
+}
+
+// Pide un comentario cortito generado con IA sobre CÓMO fue esta
+// partida en particular (no es texto fijo: cambia según el puntaje,
+// si llegó al jefe, cuántos pickups agarró, etc). Se muestra al toque
+// un comentario/título de reserva (siempre en español) para que la
+// pantalla nunca se quede muda, y si la IA contesta bien a tiempo (y
+// en español), lo reemplaza por su versión específica de esta partida.
 async function requestAiGameOverComment(stats) {
-  aiCommentEl.textContent = '...';
+  const fallback = pickGameOverFallback(stats.won);
+  aiCommentEl.textContent = fallback.message;
   aiCommentEl.classList.add('ai-comment--visible');
+  aiTitleEl.textContent = `Título obtenido: ${fallback.title}`;
+  aiTitleEl.classList.add('ai-comment--visible');
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -1952,20 +2066,16 @@ async function requestAiGameOverComment(stats) {
     // Si para cuando llega la respuesta el jugador ya volvió a jugar o
     // cerró la pantalla, no la mostramos pisada arriba de otra cosa.
     if (!state.pendingScoreSave) return;
-    if (data && data.message) {
+    if (data && data.message && looksSpanish(data.message)) {
       aiCommentEl.textContent = data.message;
-    } else {
-      aiCommentEl.classList.remove('ai-comment--visible');
     }
-    if (data && data.title) {
+    // Si vino vacío o en otro idioma, se queda el comentario de
+    // reserva que ya se está mostrando (nunca en blanco, nunca en inglés).
+    if (data && data.title && looksSpanish(data.title)) {
       aiTitleEl.textContent = `Título obtenido: ${data.title}`;
-      aiTitleEl.classList.add('ai-comment--visible');
-    } else {
-      aiTitleEl.classList.remove('ai-comment--visible');
     }
   } catch (err) {
-    aiCommentEl.classList.remove('ai-comment--visible');
-    aiTitleEl.classList.remove('ai-comment--visible');
+    // silencioso a propósito: ya se ve el comentario/título de reserva
   }
 }
 
@@ -2281,14 +2391,18 @@ function wrapCanvasText(text, maxWidth) {
 }
 
 // Frase de provocación del jefe final: texto (sin voz, para que se
-// entienda igual aunque no se escuche el audio del estand). Va en una
-// esquina, chiquito y en amarillo, con un fondito oscuro semi
-// transparente para que se lea bien encima de las abejas/disparos sin
-// tapar ni abrumar el área de juego.
+// entienda igual aunque no se escuche el audio del estand). Flota al
+// costado de la abeja jefa, como un globo de diálogo con una colita
+// que apunta hacia ella, para que quede clarísimo que es ELLA la que
+// está hablando (y no un cartel suelto en una esquina). Cuando es la
+// risa burlona en mayúsculas (te mató con su propia bala), se dibuja
+// más grande y en rojo/naranja para que se note el sobrador que es.
 function drawBossTaunt() {
   const t = state.bossTaunt;
-  if (!t || t.timer <= 0 || !t.text) return;
+  if (!t || t.timer <= 0 || !t.text || !state.boss) return;
   const cfg = CONFIG.boss;
+  const b = state.boss;
+  const isLaughCaps = t.kind === 'laughcaps';
 
   // Se desvanece de entrada y de salida (últimos/primeros 0.4s).
   const fade = 0.4;
@@ -2300,36 +2414,63 @@ function drawBossTaunt() {
   }
 
   ctx.save();
-  ctx.font = "bold 11px 'Segoe UI', Arial, sans-serif";
+  ctx.font = isLaughCaps
+    ? "bold 13px 'Segoe UI', Arial, sans-serif"
+    : "bold 11px 'Segoe UI', Arial, sans-serif";
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
 
-  const maxTextWidth = 172;
+  const maxTextWidth = 150;
   const lines = wrapCanvasText(t.text, maxTextWidth).slice(0, 4);
-  const lineHeight = 14;
+  const lineHeight = isLaughCaps ? 16 : 14;
   const paddingX = 9;
   const paddingY = 8;
   const boxW = maxTextWidth + paddingX * 2;
   const boxH = lines.length * lineHeight + paddingY * 2 - 2;
 
-  // Esquina superior derecha del canvas, debajo de donde entra el
-  // jefe: fuera del recorrido lateral del jefe y de la nave, así no
-  // interfiere con las abejas ni los disparos del área central.
-  const boxX = CONFIG.canvasW - boxW - 10;
-  const boxY = 12;
+  // Decide de qué lado del jefe flota el globo: del lado donde haya
+  // más espacio dentro del canvas, para que nunca se vaya de pantalla.
+  const bossCenterX = b.x + b.w / 2;
+  const putOnRight = bossCenterX < CONFIG.canvasW / 2;
+  const gap = 14; // separación entre la abeja y el globo
+  const boxX = putOnRight
+    ? clamp(b.x + b.w + gap, 4, CONFIG.canvasW - boxW - 4)
+    : clamp(b.x - gap - boxW, 4, CONFIG.canvasW - boxW - 4);
+  const boxY = clamp(b.y - 6, 4, CONFIG.canvasH - boxH - 4);
 
-  ctx.globalAlpha = alpha * 0.55;
-  ctx.fillStyle = '#0a0715';
+  const bgColor = isLaughCaps ? '#2a0508' : '#0a0715';
+  const borderColor = isLaughCaps ? 'rgba(255,90,60,0.65)' : 'rgba(255,225,77,0.35)';
+  const textColor = isLaughCaps ? '#ff6a3d' : '#ffe14d';
+
+  ctx.globalAlpha = alpha * 0.6;
+  ctx.fillStyle = bgColor;
   ctx.fillRect(boxX, boxY, boxW, boxH);
 
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = 'rgba(255,225,77,0.35)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = isLaughCaps ? 1.5 : 1;
   ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxW - 1, boxH - 1);
 
-  ctx.fillStyle = '#ffe14d';
-  ctx.shadowColor = '#ffe14d';
-  ctx.shadowBlur = 5;
+  // Colita del globo apuntando hacia la abeja jefa.
+  const tailY = clamp(b.y + b.h / 2, boxY + 6, boxY + boxH - 6);
+  ctx.fillStyle = bgColor;
+  ctx.beginPath();
+  if (putOnRight) {
+    ctx.moveTo(boxX, tailY - 6);
+    ctx.lineTo(boxX, tailY + 6);
+    ctx.lineTo(boxX - gap + 2, tailY);
+  } else {
+    ctx.moveTo(boxX + boxW, tailY - 6);
+    ctx.lineTo(boxX + boxW, tailY + 6);
+    ctx.lineTo(boxX + boxW + gap - 2, tailY);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = textColor;
+  ctx.shadowColor = textColor;
+  ctx.shadowBlur = isLaughCaps ? 7 : 5;
   lines.forEach((line, i) => {
     ctx.fillText(line, boxX + paddingX, boxY + paddingY + i * lineHeight);
   });

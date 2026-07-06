@@ -12,7 +12,10 @@
 // El front-end (script.js) le hace un POST a /api/gameover-message con
 // los datos de la partida que acaba de terminar, y esta función le
 // contesta con una frase cortita generada por IA para esa partida en
-// particular.
+// particular. El front-end YA tiene su propio comentario/título de
+// reserva en español listo para mostrar apenas termina la partida, así
+// que si esta función falla o contesta en otro idioma, el juego sigue
+// viéndose bien igual.
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -24,7 +27,7 @@ export default async function handler(req, res) {
   if (!apiKey) {
     // Si todavía no se configuró la variable de entorno en Vercel, no
     // rompemos el juego: devolvemos un error controlado y el front-end
-    // simplemente no muestra el comentario de IA.
+    // simplemente se queda con su comentario de reserva en español.
     res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en Vercel' });
     return;
   }
@@ -51,6 +54,8 @@ export default async function handler(req, res) {
   const prediccionLinea = predictedScore
     ? `- Antes de arrancar, "la máquina" había predicho que este jugador haría ${predictedScore} puntos (dato extra, opcional: si te copa podés hacer una mención breve de si le ganó o no a esa predicción, pero no es obligatorio).`
     : '';
+
+  const systemInstruction = 'Respondés siempre, sin ninguna excepción, en español rioplatense (de Argentina). Nunca en inglés ni en ningún otro idioma, sin importar en qué idioma esté la consigna. Esto aplica a TODOS los campos del JSON que devolvés.';
 
   const prompt = `Sos el locutor arcade de "INVASORES", un jueguito de nave estilo Galaga hecho por el estudio "Bytes Creativos" para un evento presencial (la gente juega una sola partida rápida al pasar por el stand).
 
@@ -82,6 +87,7 @@ Ninguno de los dos campos debe tener comillas internas ni emojis.`;
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemInstruction }] },
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: 150, responseMimeType: 'application/json' },
       }),
@@ -101,8 +107,8 @@ Ninguno de los dos campos debe tener comillas internas ni emojis.`;
     // El front-end necesita "message" (comentario) y "title" (apodo)
     // como dos campos separados y ya limpios. Si por algo la IA no
     // devolvió JSON válido, no rompemos nada: usamos el texto crudo
-    // como comentario y dejamos el título vacío (el front-end
-    // simplemente no muestra el título en ese caso).
+    // como comentario y dejamos el título vacío (el front-end tiene su
+    // propio comentario/título de reserva en español para ese caso).
     let message = '';
     let title = '';
     try {
@@ -114,8 +120,24 @@ Ninguno de los dos campos debe tener comillas internas ni emojis.`;
       message = rawText;
     }
 
+    // Chequeo liviano: si por algo se escapó en inglés a pesar de las
+    // instrucciones, no lo mandamos (el front-end se queda con su
+    // comentario/título de reserva en español).
+    if (message && !looksSpanish(message)) message = '';
+    if (title && !looksSpanish(title)) title = '';
+
     res.status(200).json({ message, title });
   } catch (err) {
     res.status(500).json({ error: 'No se pudo generar el comentario', detail: String(err) });
   }
+}
+
+// Chequeo rápido y liviano (no es detección "seria" de idioma) para
+// filtrar respuestas que se le escaparon en inglés al modelo.
+const ENGLISH_TELLS = /\b(the|you|your|and|is|are|was|were|this|that|i'm|im|don't|dont|gonna|going|will|can't|cant|what|with|have|has|not|for)\b/gi;
+function looksSpanish(text) {
+  const matches = text.match(ENGLISH_TELLS);
+  if (!matches) return true;
+  const wordCount = text.trim().split(/\s+/).length;
+  return matches.length / wordCount < 0.34;
 }
