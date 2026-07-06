@@ -1,0 +1,85 @@
+// Igual que los otros endpoints de /api: corre en el servidor de
+// Vercel, la GEMINI_API_KEY nunca llega al navegador.
+//
+// Se llama UNA vez, justo cuando el jugador ve la pantalla de
+// instrucciones (antes de arrancar la partida), mientras lee el
+// texto y escribe su nombre — así la respuesta ya está lista (o casi)
+// para cuando aprieta "JUGAR", sin agregar espera. Devuelve un
+// puntaje "predicho" con onda arcade y una frase para mostrar. El
+// puntaje predicho se guarda en el front-end para compararlo con el
+// puntaje real al terminar la partida.
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Método no permitido' });
+    return;
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'Falta configurar GEMINI_API_KEY en Vercel' });
+    return;
+  }
+
+  const body = req.body || {};
+  const playerNameRaw = typeof body.playerName === 'string' ? body.playerName : 'PILOTO';
+  const playerName = playerNameRaw.slice(0, 20);
+
+  const prompt = `Sos "la máquina", el sistema arcade que predice puntajes antes de que un jugador arranque una partida de "INVASORES" (jueguito de nave estilo Galaga del estudio "Bytes Creativos", para un evento presencial donde la gente juega una sola partida rápida).
+
+El jugador que está por arrancar se llama "${playerName}". Todavía no jugó nada.
+
+Devolvé SOLO un JSON válido, sin texto extra, sin markdown, sin backticks, con exactamente estas dos claves:
+{"predictedScore": <número entero entre 800 y 6000, en onda arcade>, "line": "<una frase cortita, máximo 18 palabras, en español rioplatense, con onda arcade/retro, retadora, dirigida a ${playerName}, que mencione ese mismo número de puntos predichos>"}
+
+El campo "line" tiene que integrar el número de predictedScore de forma natural (por ejemplo con la idea de "la máquina cree que vas a hacer X puntos"). No uses comillas dentro del texto de "line" ni emojis.`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const model = 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 120, responseMimeType: 'application/json' },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(502).json({ error: 'Error de la API de Gemini', detail: errText });
+      return;
+    }
+
+    const data = await response.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+
+    let predictedScore = null;
+    let line = '';
+    try {
+      const cleaned = rawText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
+      const parsed = JSON.parse(cleaned);
+      predictedScore = Number(parsed.predictedScore) || null;
+      line = typeof parsed.line === 'string' ? parsed.line.trim() : '';
+    } catch (parseErr) {
+      // Si por algo la IA no devolvió JSON válido, no rompemos nada:
+      // simplemente no hay predicción para esta partida.
+    }
+
+    if (!predictedScore || !line) {
+      res.status(200).json({ predictedScore: null, line: '' });
+      return;
+    }
+
+    res.status(200).json({ predictedScore, line });
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo generar la predicción', detail: String(err) });
+  }
+}

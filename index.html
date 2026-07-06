@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Space Shooter — Formación</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="side-deco" class="side-deco side-deco-left" aria-hidden="true"></div>
+
+<div id="page-row">
+
+  <div id="highscore-panel">
+    <div id="highscore-title">TOP<br>PUNTAJES</div>
+    <ol id="highscore-list"></ol>
+    <div id="highscore-live">
+      <span class="label">TU PUNTAJE</span>
+      <span id="highscore-live-score">0</span>
+    </div>
+    <button id="view-podium-btn">VER PODIO</button>
+  </div>
+
+  <div id="arcade">
+    <div id="hud">
+      <span class="label" id="hud-score-btn">PUNTAJE <span id="score">0</span></span>
+      <span id="lives">
+        <span class="label">VIDAS</span>
+        <span id="lives-icons"></span>
+      </span>
+    </div>
+
+    <div id="crt-screen" style="position:relative;">
+      <canvas id="game" width="680" height="560"></canvas>
+      <div id="scanlines"></div>
+      <div id="overlay" class="title-mode">
+        <div id="title-screen">
+          <h1 id="game-title">INVASORES</h1>
+                      <div id="title-by">by</div>
+          <img id="title-logo" src="images/bytes_creativos_logo.png" alt="Bytes Creativos">
+          <div id="title-spacer"></div>
+          <div id="title-footer">
+            <button id="title-start-btn">EMPEZAR</button>
+          </div>
+          <a id="title-ig-link" class="ig-link" href="https://www.instagram.com/bytescreativoss/" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="2" width="20" height="20" rx="6" stroke="#f8f9fe" stroke-width="2"/>
+              <circle cx="12" cy="12" r="5" stroke="#f8f9fe" stroke-width="2"/>
+              <circle cx="17.5" cy="6.5" r="1.3" fill="#f8f9fe"/>
+            </svg>
+            bytescreativoss
+          </a>
+        </div>
+
+        <div id="overlay-content">
+          <h1 id="overlay-title">Los invasores quieren robarse nuestra información, ¡No podemos permitirlo! <br>
+</h1>
+          <p id="overlay-text">
+           <br>
+        <br>
+            Flechas <b>← →</b> para moverte, <b>ESPACIO</b> para disparar.
+          </p>
+          <p id="ai-title" class="ai-title"></p>
+          <p id="ai-comment" class="ai-comment"></p>
+          <p id="ai-prediction" class="ai-prediction"></p>
+          <input id="title-name-input" type="text" maxlength="12" placeholder="TU NOMBRE">
+          <button id="overlay-btn">JUGAR</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="controls-hint">← → MOVER &nbsp;·&nbsp; ESPACIO DISPARAR &nbsp;·&nbsp; P PAUSA</div>
+  </div>
+
+</div>
+
+<div id="side-deco" class="side-deco side-deco-right" aria-hidden="true"></div>
+
+<!-- Controles táctiles: solo visibles en celulares/tablets (ver JS más
+     abajo, que agrega la clase "touch-mode" al body si detecta un
+     dispositivo táctil). Usan los mismos flags state.keys que el
+     teclado, así que no tocan nada de la lógica del juego. -->
+<button id="btn-pause" class="touch-btn touch-pause-btn" aria-label="Pausa" type="button">II</button>
+
+<div id="touch-controls">
+  <div id="touch-joystick">
+    <div id="joystick-knob"></div>
+  </div>
+  <button id="btn-fire" class="touch-btn touch-fire-btn" aria-label="Disparar" type="button">FUEGO</button>
+</div>
+
+
+<!-- ====== Modal del PODIO: se abre con el botón "VER PODIO" ====== -->
+<div id="podium-modal">
+  <div id="podium-modal-content">
+    <div id="podium-title">
+      <span id="podium-title-main">INVASORES</span>
+      <span id="podium-title-sub">TOP TRES</span>
+    </div>
+    <div id="podium-list">
+      <div class="podium-row" id="podium-1">
+        <span class="podium-rank">1°</span>
+        <span class="podium-name">---</span>
+        <span class="podium-score">0</span>
+      </div>
+      <div class="podium-row" id="podium-2">
+        <span class="podium-rank">2°</span>
+        <span class="podium-name">---</span>
+        <span class="podium-score">0</span>
+      </div>
+      <div class="podium-row" id="podium-3">
+        <span class="podium-rank">3°</span>
+        <span class="podium-name">---</span>
+        <span class="podium-score">0</span>
+      </div>
+    </div>
+    <img id="podium-logo" src="images/bytes_creativos_logo.png" alt="Bytes Creativos">
+    <div id="podium-btn-row">
+      <button id="podium-home-btn">VOLVER</button>
+      <button id="podium-title-btn">INICIO</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

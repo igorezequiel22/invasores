@@ -1,0 +1,6 @@
+{
+  "name": "invasores-bytes-creativos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Space shooter para evento de Bytes Creativos, con comentario de IA al final de la partida."
+}
