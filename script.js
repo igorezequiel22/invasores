@@ -355,6 +355,22 @@ function showOverlay(title, text, buttonText, showName) {
   aiTitleEl.classList.remove('ai-comment--visible');
   aiPredictionEl.textContent = '';
   aiPredictionEl.classList.remove('ai-comment--visible');
+  // "showName" es true únicamente en la pantalla de instrucciones
+  // (antes de jugar). Los elementos que no aplican a esta pantalla se
+  // sacan del todo del flujo (display:none), no solo se hacen
+  // invisibles: si no, igual reservan su espacio vertical (por el
+  // min-height y el gap del contenedor) y en la compu, donde el
+  // recuadro tiene una altura fija, eso hacía falta scroll para ver
+  // el botón de más abajo.
+  if (showName) {
+    aiTitleEl.style.display = 'none';
+    aiCommentEl.style.display = 'none';
+    aiPredictionEl.style.display = '';
+  } else {
+    aiPredictionEl.style.display = 'none';
+    aiTitleEl.style.display = '';
+    aiCommentEl.style.display = '';
+  }
   // El input de nombre solo se muestra en la pantalla de instrucciones
   // (antes de arrancar una partida nueva), no en pausa ni en game over.
   if (showName) {
@@ -412,10 +428,10 @@ titleStartBtn.addEventListener('click', () => {
  showOverlay(
   '¡ATENCIÓN!',
   `
-  Los invasores quieren robarse nuestra información.<br>
+  Los invasores quieren robarse nuestra información,<br>
   <strong>¡No podemos permitirlo!</strong>
 
-  <br><br><br>
+  <br><br>
 
   Flechas <b>← →</b> para moverte,<br>
   <b>ESPACIO</b> para disparar.
