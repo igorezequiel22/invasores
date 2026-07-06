@@ -583,6 +583,8 @@
     padding-top: 34px;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-width: none;      /* Firefox: sin barra visible */
+    -ms-overflow-style: none;   /* versiones viejas de Edge/IE */
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -595,6 +597,13 @@
       backdrop-filter 0.32s ease,
       -webkit-backdrop-filter 0.32s ease,
       visibility 0s linear 0.32s;
+  }
+  /* Chrome/Safari/Edge nuevo: mismo truco, sin barra visible pero el
+     scroll sigue funcionando igual (con el dedo, la rueda, flechas). */
+  #overlay::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   #overlay.show {
