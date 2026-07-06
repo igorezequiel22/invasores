@@ -1815,7 +1815,7 @@ function spawnFinalExplosion(x, y) {
 // que se disparan en todas direcciones y se apagan solas ----
 // ---- Explosión GIGANTE del jefe final: un millón de pedazos de colores ----
 function spawnBossExplosion(x, y) {
-  const colors = ['#fff', '#ffd23f', '#ff9d3d', '#ff3d3d', '#4dfff0', '#ff3d81', '#b6ff3d', '#ffe066'];
+  const colors = ['#fff126', '#ffffff', '#79f017', '#ff1ba0', '#ffffff', '#ff3d81', '#b6ff3d', '#ebf83a'];
   for (let i = 0; i < 220; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 80 + Math.random() * 520;
@@ -1833,7 +1833,7 @@ function spawnBossExplosion(x, y) {
 }
 
 function spawnExplosion(x, y) {
-  const colors = ['#fff', '#ffd23f', '#ff9d3d', '#ff3d3d'];
+  const colors = ['#fff', '#ffd23f', '#ff8f1f', '#ff0000'];
   for (let i = 0; i < 22; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 60 + Math.random() * 160;
@@ -2009,7 +2009,7 @@ function gameOver(won) {
   playCrtTransition(() => {
     showOverlay(
       won ? '¡FORMACIÓN DESTRUIDA!' : 'GAME OVER',
-      `${resultLine}<br>¡Buen juego, ${escapeHtml(currentPlayerName)}! Tu puntaje se guarda en la tabla.`,
+      `${resultLine}<br>¡Buen juego, ${escapeHtml(currentPlayerName)}!`,
       'GUARDAR Y JUGAR DE NUEVO'
     );
     state.pendingScoreSave = true;
