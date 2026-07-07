@@ -158,6 +158,35 @@ const CONFIG = {
     retryDelay: 0.6,   // si no hay lugar/candidatas, reintenta lanzar oleada tras este ratito
   },
 
+  // Cuando la formación (o alguna abeja) toca el fondo de la pantalla, en
+  // vez de quedarse girando en el centro, las abejas se dispersan: la
+  // mitad hacia la izquierda y la mitad hacia la derecha, como
+  // desapareciendo de la pantalla. Después reaparecen arriba y bajan
+  // rápido disparando, de forma dispersa (nunca todas juntas), dando la
+  // sensación de que la nave vuela hacia adelante atravesando el
+  // enjambre. Esto se repite en bucle sin perder ninguna abeja: la
+  // cantidad total se mantiene igual a la que había en ese momento.
+  // Cuando la formación (o alguna abeja) toca el fondo de la pantalla, en
+  // vez de quedarse girando en el centro, las abejas se dispersan: la
+  // mitad hacia la izquierda y la mitad hacia la derecha, como
+  // desapareciendo de la pantalla. Después reaparecen arriba y bajan
+  // rápido disparando, siempre de a 2 o 3 a la vez (nunca todas juntas,
+  // pero tampoco dejando la pantalla vacía) hasta que se eliminan todas
+  // — ahí recién puede aparecer el jefe. La cantidad total se mantiene
+  // igual a la que había en el momento en que tocaron el piso.
+  stormDive: {
+    scatterSpeed: 300,     // velocidad con la que se van a los costados (px/s)
+    diveSpeed: 260,        // velocidad de la picada rápida desde arriba (px/s)
+    driftMax: 70,          // desvío horizontal leve durante la picada (px/s)
+    startAboveMin: 20,     // cuánto arriba de la pantalla espera (fuera de cámara)
+    startAboveMax: 160,
+    concurrentMin: 2,          // como mínimo se ven cayendo 2 a la vez...
+    concurrentMax: 3,          // ...o 3, variando cada vez que se rellena el cupo
+    refillMin: 0.12,           // demora mínima entre una abeja nueva y la siguiente al rellenar
+    refillMax: 0.3,            // demora máxima (para que no aparezcan en el mismo instante exacto)
+    speedBoostMultiplier: 1.015, // ~1.5% más rápido una vez eliminada la mitad de las que entraron al modo enjambre
+  },
+
   // Animación de entrada al arrancar una partida nueva: la nave sube
   // lentamente desde abajo del todo y las abejas bajan desde arriba
   // hasta acomodarse en su formación, antes de mostrar "START".
@@ -235,7 +264,11 @@ function loadHighScores() {
 async function refreshHighScores() {
   try {
     const res = await fetch(`/api/scores?limit=${HIGHSCORE_MAX}`);
-    if (!res.ok) throw new Error('bad response');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      console.error('No se pudo traer la tabla de puntajes compartida:', data.error || res.status);
+      return;
+    }
     const data = await res.json();
     if (Array.isArray(data.scores)) {
       highScoresMemory = data.scores;
@@ -243,9 +276,10 @@ async function refreshHighScores() {
       if (podiumModal.classList.contains('show')) renderPodium();
     }
   } catch (err) {
-    // silencioso a propósito: si falla, se sigue viendo la última
-    // tabla que se pudo traer (o "sin puntajes todavía" si es la
-    // primera vez y todavía no hay red)
+    // se sigue viendo la última tabla que se pudo traer (o "sin
+    // puntajes todavía" si es la primera vez y todavía no hay red);
+    // el motivo queda en la consola para poder diagnosticar
+    console.error('No se pudo conectar con /api/scores para traer la tabla:', err);
   }
 }
 
@@ -256,13 +290,20 @@ async function refreshHighScores() {
 async function addHighScore(name, score) {
   const cleanName = (name || 'JUGADOR').toUpperCase().slice(0, 12);
   try {
-    await fetch('/api/scores', {
+    const res = await fetch('/api/scores', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: cleanName, score }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      // Se deja en la consola del navegador (F12 -> Console) para
+      // poder diagnosticar: antes, si el servidor fallaba, no se veía
+      // ningún aviso en ningún lado y parecía que "no pasaba nada".
+      console.error('No se pudo guardar el puntaje en la tabla compartida:', data.error || res.status);
+    }
   } catch (err) {
-    // silencioso a propósito
+    console.error('No se pudo conectar con /api/scores para guardar el puntaje:', err);
   }
   refreshHighScores();
 }
@@ -759,7 +800,10 @@ function resetGame() {
     entering: false,     // true mientras la nave/abejas se están acomodando al arrancar
     enterT: 0,           // tiempo transcurrido de la animación de entrada
     startTextTimer: 0,   // cuenta regresiva mostrando "START" antes de habilitar el juego
-    formationToOrbit: false, // true cuando la formación debe convertirse a órbita
+    formationToStorm: false, // true cuando la formación debe pasar al modo enjambre (dispersión + picada continua)
+    stormConcurrentTarget: 0, // cuántas abejas queremos viendo caer a la vez (2 o 3, se resortea solo)
+    stormRefillTimer: 0,      // demora antes de sumar la próxima abeja al rellenar el cupo
+    stormSpeedBoost: false,   // true cuando ya se eliminó la mitad de las abejas del enjambre (bajan más rápido)
     playerExiting: false, // true cuando el avión se va hacia arriba después de ganar
     playerExitTimer: 0,   // tiempo de salida del avión
   };
@@ -789,11 +833,14 @@ function buildEnemyGrid() {
         damaged: false,
         diving: false,
         returning: false,
-        orbiting: false,
-        orbitEntering: false,
-        orbitAngle: Math.random() * Math.PI * 2,
-        orbitRadius: 60 + Math.random() * 80,
-        orbitSpeed: 1.5 + Math.random() * 1.5,
+        storm: false,        // true cuando la abeja pasó al modo enjambre (tras tocar el fondo)
+        stormPhase: '',      // 'scatter' -> 'wait' -> 'dive' (ver updateStormEnemy)
+        scatterDir: 0,       // -1 se dispersa por la izquierda, 1 por la derecha
+        scatterSpeed: 0,
+        stormVX: 0,          // leve desvío horizontal durante la picada rápida
+        stormT: 0,           // tiempo transcurrido en la fase de picada (para el disparo)
+        stormDelay: 0,       // demora antes de arrancar la próxima picada (dispersión temporal)
+        hasShotStorm: false,
         lastShot: Math.random() * 2,
         hasShot: false,
         secondShot: false,
@@ -1092,7 +1139,7 @@ function updateFormation(dt) {
 
   // Calculamos el ancho actual de la formación viva para saber los bordes
   // (las que están picando, volviendo u orbitando no cuentan, no siguen la marcha)
-  const alive = state.enemies.filter(e => e.alive && !e.diving && !e.returning && !e.orbiting);
+  const alive = state.enemies.filter(e => e.alive && !e.diving && !e.returning && !e.storm);
   if (alive.length === 0) return;
   const minX = Math.min(...alive.map(e => e.baseX)) + f.offsetX;
   const maxX = Math.max(...alive.map(e => e.baseX)) + f.offsetX;
@@ -1102,7 +1149,10 @@ function updateFormation(dt) {
     f.offsetY += CONFIG.enemyMarch.dropOnEdge;
   }
 
-  // Cuando la formación toca el suelo, convertir a órbita
+  // Cuando la formación toca el suelo, en vez de quedarse girando en el
+  // centro, pasa al modo enjambre: se dispersa mitad a la izquierda y
+  // mitad a la derecha, y después vuelve a bajar rápido y disperso
+  // desde arriba (ver enterStormMode / updateStormEnemy).
   let anyTouchingFloor = false;
   for (const e of alive) {
     const screenY = e.baseY + f.offsetY;
@@ -1112,25 +1162,128 @@ function updateFormation(dt) {
     }
   }
   
-  // Si detectamos que toca el suelo, marcar todas para órbita
-  if (anyTouchingFloor && !state.formationToOrbit) {
-    state.formationToOrbit = true;
+  // Si detectamos que toca el suelo, marcar todas para el modo enjambre
+  if (anyTouchingFloor && !state.formationToStorm) {
+    state.formationToStorm = true;
   }
   
-  // Convertir todas las abejas en formación a órbita simultáneamente
-  if (state.formationToOrbit) {
+  // Pasar todas las abejas de la formación al modo enjambre a la vez.
+  // Ninguna desaparece: se mantiene la misma cantidad que había en ese
+  // momento, solo cambia cómo se comportan de ahí en adelante.
+  if (state.formationToStorm) {
     for (const e of alive) {
-      if (!e.orbiting) {
-        e.orbiting = true;
-        e.orbitAngle = Math.random() * Math.PI * 2;
-        e.orbitRadius = 60 + Math.random() * 80;
-        e.orbitSpeed = 1.5 + Math.random() * 1.5;
-        e.lastShot = 0;
-        e.orbitEntering = true;
-        // Aparecen desde arriba para transición limpia
-        e.y = -24;
-        e.x = CONFIG.canvasW / 2 + (Math.random() - 0.5) * 60;
+      if (!e.storm) enterStormMode(e);
+    }
+  }
+}
+
+// Hace que una abeja pase al modo "enjambre": primero se dispersa hacia
+// su costado (izquierda si estaba del lado izquierdo de la pantalla,
+// derecha si estaba del lado derecho) como desapareciendo de la
+// pantalla. Al salir de cámara queda "en cola" (ver updateStormReleases)
+// hasta que le toca reaparecer junto con su grupo de 2 o 3.
+function enterStormMode(e) {
+  const cfg = CONFIG.stormDive;
+  e.storm = true;
+  e.stormPhase = 'scatter';
+  const centerX = e.x + e.w / 2;
+  e.scatterDir = centerX < CONFIG.canvasW / 2 ? -1 : 1;
+  e.scatterSpeed = cfg.scatterSpeed * (0.85 + Math.random() * 0.3);
+}
+
+// Mantiene siempre 2 o 3 abejas cayendo a la vez: apenas alguna de las
+// que estaban cayendo se elimina o termina de cruzar la pantalla, suma
+// una nueva desde la cola (con una demora chiquita para que no aparezcan
+// en el mismo instante exacto). Así nunca queda la pantalla vacía ni se
+// hace esperar una tanda: en todo momento hay abejas bajando, de a 2 o
+// de a 3, hasta que se eliminan todas — recién ahí puede aparecer el jefe.
+function updateStormReleases(dt) {
+  const cfg = CONFIG.stormDive;
+
+  if (!state.stormConcurrentTarget) {
+    state.stormConcurrentTarget = cfg.concurrentMin + Math.floor(Math.random() * (cfg.concurrentMax - cfg.concurrentMin + 1));
+  }
+
+  const diving = state.enemies.filter(e => e.alive && e.storm && e.stormPhase === 'dive').length;
+  const waiting = state.enemies.filter(e => e.alive && e.storm && e.stormPhase === 'queued');
+
+  if (diving < state.stormConcurrentTarget && waiting.length > 0) {
+    state.stormRefillTimer -= dt;
+    if (state.stormRefillTimer <= 0) {
+      const e = waiting[Math.floor(Math.random() * waiting.length)];
+      activateStormDive(e);
+      state.stormRefillTimer = cfg.refillMin + Math.random() * (cfg.refillMax - cfg.refillMin);
+      // Cupo lleno: resorteamos el próximo objetivo (2 o 3) para variar.
+      if (diving + 1 >= state.stormConcurrentTarget) {
+        state.stormConcurrentTarget = cfg.concurrentMin + Math.floor(Math.random() * (cfg.concurrentMax - cfg.concurrentMin + 1));
       }
+    }
+  }
+
+  // Dificultad: si ya se eliminó la mitad (o más) de las abejas que
+  // entraron al modo enjambre, las que quedan bajan un poco más rápido.
+  const totalStorm = state.enemies.filter(e => e.storm).length;
+  if (totalStorm > 0) {
+    const deadStorm = state.enemies.filter(e => e.storm && !e.alive).length;
+    state.stormSpeedBoost = deadStorm >= totalStorm / 2;
+  }
+}
+
+// Ubica a la abeja arriba de la pantalla y la manda a caer.
+function activateStormDive(e) {
+  const cfg = CONFIG.stormDive;
+  e.stormPhase = 'dive';
+  e.y = -(cfg.startAboveMin + Math.random() * (cfg.startAboveMax - cfg.startAboveMin));
+  e.x = 20 + Math.random() * (CONFIG.canvasW - 40 - e.w);
+  e.stormVX = (Math.random() - 0.5) * cfg.driftMax;
+  e.stormDelay = 0;
+  e.stormT = 0;
+  e.hasShotStorm = false;
+}
+
+// Actualiza una abeja que ya está en modo "enjambre", a través de sus
+// fases: 'scatter' (se va al costado y desaparece de pantalla), 'queued'
+// (espera oculta, fuera de cámara, a que el manager la sume al cupo de
+// 2-3 que están cayendo) y 'dive' (baja rápido disparando). Al llegar
+// abajo vuelve a 'queued' y espera su turno de nuevo — así siempre hay
+// abejas bajando, de a 2 o 3, sin huecos ni pantalla vacía, hasta que se
+// eliminan todas.
+function updateStormEnemy(e, dt) {
+  const cfg = CONFIG.stormDive;
+
+  if (e.stormPhase === 'scatter') {
+    e.x += e.scatterDir * e.scatterSpeed * dt;
+    const offLeft = e.x + e.w < -10;
+    const offRight = e.x > CONFIG.canvasW + 10;
+    if (offLeft || offRight) {
+      e.stormPhase = 'queued';
+      e.y = -9999; // oculta, fuera de cámara, esperando que le toque su turno
+    }
+  } else if (e.stormPhase === 'queued') {
+    // No hace nada: el manager (updateStormReleases) la elige cuando
+    // hace falta rellenar el cupo de 2-3 que están cayendo.
+  } else if (e.stormPhase === 'dive') {
+    e.stormT += dt;
+    const speed = cfg.diveSpeed * (state.stormSpeedBoost ? cfg.speedBoostMultiplier : 1);
+    e.y += speed * dt;
+    e.x += e.stormVX * dt;
+
+    if (!e.hasShotStorm && e.stormT > 0.2) {
+      state.enemyBullets.push({
+        x: e.x + e.w / 2 - CONFIG.enemyBullet.width / 2,
+        y: e.y + e.h,
+        w: CONFIG.enemyBullet.width,
+        h: CONFIG.enemyBullet.height,
+        ...aimedBulletVelocity(e.x + e.w / 2, e.y + e.h),
+      });
+      e.hasShotStorm = true;
+    }
+
+    if (e.y > CONFIG.canvasH + 30) {
+      // Vuelve a la cola, esperando su turno de nuevo (se mantiene la
+      // misma cantidad de abejas de siempre, siguen bajando sin parar).
+      e.stormPhase = 'queued';
+      e.y = -9999;
     }
   }
 }
@@ -1230,6 +1383,7 @@ function aimedBulletVelocity(fromX, fromY) {
 function updateEnemies(dt) {
   const f = state.formation;
   updateDiveWaves(dt);
+  updateStormReleases(dt);
 
   for (const e of state.enemies) {
     if (!e.alive) continue;
@@ -1283,16 +1437,10 @@ function updateEnemies(dt) {
           shouldReturn = true;
         }
         if (e.y > CONFIG.canvasH - 40) {
-          // Toca el suelo: va a órbita
+          // Toca el suelo: pasa al modo enjambre (dispersión + picada
+          // continua) en vez de quedarse girando en el centro.
           e.diving = false;
-          e.orbiting = true;
-          e.orbitEntering = true;
-          e.y = -24;
-          e.x = CONFIG.canvasW / 2 + (Math.random() - 0.5) * 60;
-          e.orbitAngle = Math.random() * Math.PI * 2;
-          e.orbitRadius = 60 + Math.random() * 80;
-          e.orbitSpeed = 1.5 + Math.random() * 1.5;
-          e.lastShot = 0;
+          enterStormMode(e);
           shouldReturn = false;
         }
       } else {
@@ -1323,14 +1471,7 @@ function updateEnemies(dt) {
       // Si la formación toca el suelo, ir a órbita en lugar de volver a formación
       if (targetY > CONFIG.canvasH - 40) {
         e.returning = false;
-        e.orbiting = true;
-        e.orbitEntering = true;
-        e.y = -24;
-        e.x = CONFIG.canvasW / 2 + (Math.random() - 0.5) * 60;
-        e.orbitAngle = Math.random() * Math.PI * 2;
-        e.orbitRadius = 60 + Math.random() * 80;
-        e.orbitSpeed = 1.5 + Math.random() * 1.5;
-        e.lastShot = 0;
+        enterStormMode(e);
       } else {
         const dx = targetX - e.x;
         const dy = targetY - e.y;
@@ -1347,48 +1488,10 @@ function updateEnemies(dt) {
           e.y += (dy / dist) * step;
         }
       }
-    } else if (e.orbiting) {
-      // --- ÓRBITA: primero suben desde arriba, luego vuelan en círculo disparando ---
-      const centerX = CONFIG.canvasW / 2;
-      const centerY = CONFIG.canvasH / 2 - 40;
-      const targetOrbitX = centerX + Math.cos(e.orbitAngle) * e.orbitRadius;
-      const targetOrbitY = centerY + Math.sin(e.orbitAngle) * e.orbitRadius;
-      
-      if (e.orbitEntering) {
-        // Fase de entrada: suben desde arriba hasta su punto de órbita
-        const dx = targetOrbitX - e.x;
-        const dy = targetOrbitY - e.y;
-        const dist = Math.hypot(dx, dy);
-        const step = CONFIG.returnSpeed * dt;
-        
-        if (dist <= step) {
-          // Llegaron a su punto de órbita
-          e.orbitEntering = false;
-          e.x = targetOrbitX;
-          e.y = targetOrbitY;
-        } else {
-          e.x += (dx / dist) * step;
-          e.y += (dy / dist) * step;
-        }
-      } else {
-        // Fase de órbita normal: vuelan en círculo
-        e.orbitAngle += e.orbitSpeed * dt;
-        e.x = centerX + Math.cos(e.orbitAngle) * e.orbitRadius;
-        e.y = centerY + Math.sin(e.orbitAngle) * e.orbitRadius;
-      }
-      
-      // Disparar mientras órbita
-      e.lastShot += dt;
-      if (e.lastShot > 1.5) {
-        state.enemyBullets.push({
-          x: e.x + e.w / 2 - CONFIG.enemyBullet.width / 2,
-          y: e.y + e.h,
-          w: CONFIG.enemyBullet.width,
-          h: CONFIG.enemyBullet.height,
-          ...aimedBulletVelocity(e.x + e.w / 2, e.y + e.h),
-        });
-        e.lastShot = 0;
-      }
+    } else if (e.storm) {
+      // --- ENJAMBRE: se dispersa a los costados y después baja rápido y
+      // disperso desde arriba, en bucle, sin perder ninguna abeja ---
+      updateStormEnemy(e, dt);
     } else {
       // --- FORMACIÓN NORMAL: sigue la marcha lateral + descenso lento ---
       e.x = e.baseX + f.offsetX;
