@@ -138,6 +138,25 @@ const CONFIG = {
     spreadVX: 50,        // inclinación leve de las dos balas hacia afuera
   },
 
+  // Abeja dorada "premio": cada "interval" segundos baja una sola, de
+  // arriba hacia abajo, en un camino ondulado (zigzag suave), parpadeando
+  // en colores para que se note que es especial. Si el jugador le
+  // dispara, explota en una explosión amarilla, suma "score" puntos y
+  // muestra "+500" y "¡Bien hecho!" en amarillo (como el popup del
+  // escudo, pero un poco más grande). Si nadie le dispara, sigue bajando
+  // y desaparece sola al salir de la pantalla, sin penalidad.
+  goldenBee: {
+    interval: 15,          // segundos entre una abeja dorada y la siguiente
+    width: 14,
+    height: 11,
+    fallSpeed: 60,          // velocidad de caída (px/s)
+    marginX: 26,            // margen a los costados (para que no se corte contra el borde)
+    waveFrequency: 0.22,    // ciclos/seg — bien lento, para que el zigzag sea suave y amplio
+    blinkColors: ['#fff59d', '#ffd23f', '#ffb100', '#fff'], // parpadeo dorado
+    blinkSpeed: 2.2,         // qué tan rápido rota entre colores (más lento = más suave)
+    score: 500,
+  },
+
   // Jefe final: aparece cuando se destruye toda la formación. Ahora es
   // más grande, más resistente (20 impactos) y dispara más seguido.
   // Cambia de color cada ~7 impactos (3 estados) y muere en el disparo 20.
@@ -797,6 +816,8 @@ function resetGame() {
     enemyBullets: [],  // disparos enemigos
     particles: [],     // partículas de la explosión de la nave
     floatingTexts: [], // textos flotantes chiquitos (ej: "+200" al agarrar un pickup)
+    goldenBee: null,          // la abeja dorada premio, cuando hay una en pantalla (ver CONFIG.goldenBee)
+    goldenBeeTimer: CONFIG.goldenBee.interval,
     enemies: [],
     formation: {
       dir: 1,          // 1 = derecha, -1 = izquierda
@@ -1036,6 +1057,7 @@ function update(dt) {
   updatePickupSpawners(dt);
   updatePickups(dt);
   updateTriplePickups(dt);
+  updateGoldenBee(dt);
   updateStars(dt);
   updateParticles(dt);
   updateFloatingTexts(dt);
@@ -1722,6 +1744,22 @@ const BOSS_TAUNT_FALLBACKS = {
     'JAJAJA BAY BAY, {NAME}',
     'JAJAJAJA ESO TE PASA POR VENIR SOLO',
   ],
+  // El jefe está a punto de morir (último golpe, justo antes de explotar):
+  // una frase de despedida, entre dramática y berreta, con algún emoji.
+  dying: [
+    '¡Oh, no, no puede ser! Voy a sucumbir... 😭',
+    'Adiós, mundo cruel...',
+    'Vas a ver a la salida, {name}. 😠',
+    'Ya te voy a volver a ver, {name}...',
+    'La próxima no salís vivo, {name}.',
+    '¡Volveré!',
+    'Esto no queda acá, {name}.',
+    '¡Lelepancha, esto no puede estar pasando!',
+    'Voy a ripear... qué bajón.',
+    'Gracias totales. Fue un placer, {name}.',
+    'Me despido, campeón. 😭',
+    '¡ADIOOOOOSSS! 😠😭',
+  ],
 };
 
 function fillTauntTemplate(template, name) {
@@ -1968,6 +2006,51 @@ function updateTriplePickups(dt) {
   state.triplePickups = state.triplePickups.filter(pk => pk.y < CONFIG.canvasH + 20 && !pk.hit);
 }
 
+// ---------- ABEJA DORADA (premio) ----------
+// Cada CONFIG.goldenBee.interval segundos, si no hay ninguna en pantalla
+// todavía, aparece UNA sola abeja dorada arriba y baja ondulando. Si el
+// jugador le dispara, explota y da los 500 puntos (ver checkCollisions).
+// Si nadie le dispara, sigue bajando y desaparece sola al salir por
+// abajo, sin penalidad, y el conteo para la próxima arranca de nuevo.
+function updateGoldenBee(dt) {
+  if (state.goldenBee) {
+    const gb = state.goldenBee;
+    gb.t += dt;
+    gb.y += CONFIG.goldenBee.fallSpeed * dt;
+    // Seno lento y de amplitud amplia: recorre de punta a punta de la
+    // pantalla en un vaivén suave, sin saltos ni cambios bruscos.
+    gb.x = gb.centerX + Math.sin(gb.t * CONFIG.goldenBee.waveFrequency * Math.PI * 2 + gb.phase) * gb.amplitude;
+    if (gb.y > CONFIG.canvasH + gb.h) {
+      state.goldenBee = null; // se fue sola, sin que le disparen
+    }
+    return;
+  }
+
+  state.goldenBeeTimer -= dt;
+  if (state.goldenBeeTimer <= 0) {
+    spawnGoldenBee();
+    state.goldenBeeTimer = CONFIG.goldenBee.interval;
+  }
+}
+
+function spawnGoldenBee() {
+  const cfg = CONFIG.goldenBee;
+  const centerX = CONFIG.canvasW / 2;
+  const amplitude = CONFIG.canvasW / 2 - cfg.marginX; // llega casi hasta ambos bordes
+  // Fase inicial al azar: así no siempre arranca yendo para el mismo lado.
+  const phase = Math.random() * Math.PI * 2;
+  state.goldenBee = {
+    centerX,
+    amplitude,
+    phase,
+    x: centerX + Math.sin(phase) * amplitude,
+    y: -cfg.height,
+    w: cfg.width,
+    h: cfg.height,
+    t: 0,
+  };
+}
+
 function updateBullets(dt) {
   state.bullets.forEach(b => {
     b.y -= CONFIG.bullet.speed * dt;
@@ -2022,6 +2105,21 @@ function checkCollisions() {
     }
   }
 
+  // Balas del jugador vs la abeja dorada (premio)
+  if (state.goldenBee) {
+    for (const b of state.bullets) {
+      if (b.hit || !state.goldenBee) continue;
+      if (rectsOverlap(b, state.goldenBee)) {
+        b.hit = true;
+        const gb = state.goldenBee;
+        state.goldenBee = null;
+        state.score += CONFIG.goldenBee.score;
+        spawnGoldenBeeReward(gb.x + gb.w / 2, gb.y + gb.h / 2);
+        updateHud();
+      }
+    }
+  }
+
   // Balas del jugador vs el jefe final
   if (state.boss && state.boss.alive && !state.boss.entering) {
     for (const b of state.bullets) {
@@ -2037,6 +2135,7 @@ function checkCollisions() {
         }
         if (state.boss.hitsTaken >= CONFIG.boss.health) {
           state.boss.alive = false;
+          requestBossTaunt('dying');
           spawnBossExplosion(state.boss.x + state.boss.w / 2, state.boss.y + state.boss.h / 2);
           state.score += CONFIG.boss.score;
           updateHud();
@@ -2225,6 +2324,30 @@ function spawnBeeExplosion(x, y, accent) {
   });
 }
 
+// ---- Explosión + recompensa de la abeja dorada: explosión toda en
+// tonos amarillos (más grande que la de una abeja normal, para que se
+// note que es especial) y, como cuando se agarra el escudo, un textito
+// flotante — pero un poquito más grande y en amarillo — con "+500" y,
+// arriba, "¡Bien hecho!". ----
+function spawnGoldenBeeReward(x, y) {
+  const colors = ['#fff59d', '#ffd23f', '#ffb100', '#fff'];
+  for (let i = 0; i < 26; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 60 + Math.random() * 170;
+    state.particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.4 + Math.random() * 0.35,
+      maxLife: 0.4 + Math.random() * 0.35,
+      size: 2 + Math.random() * 3.2,
+      color: colors[Math.floor(Math.random() * colors.length)],
+    });
+  }
+  spawnFloatingText(x, y - 10, '¡BIEN HECHO!', '#ffd23f', 1.5, 1.1);
+  spawnFloatingText(x, y + 8, `+${CONFIG.goldenBee.score}`, '#ffd23f', 1.5, 1.1);
+}
+
 // ---- Chispita chiquita cuando el escudo bloquea un disparo enemigo ----
 function spawnShieldSpark(x, y) {
   for (let i = 0; i < 6; i++) {
@@ -2252,6 +2375,22 @@ function spawnScorePopup(x, y, amount) {
     vy: -34,
     life: 0.9,
     maxLife: 0.9,
+    color: CONFIG.pickup.color,
+    scaleMul: 1.5,
+  });
+}
+
+// ---- Textito flotante genérico (mismo estilo que spawnScorePopup, pero
+// con color y tamaño propios) — lo usa, por ejemplo, la abeja dorada. ----
+function spawnFloatingText(x, y, text, color, scaleMul, life) {
+  state.floatingTexts.push({
+    x, y,
+    text,
+    vy: -34,
+    life: life || 0.9,
+    maxLife: life || 0.9,
+    color,
+    scaleMul: scaleMul || 1,
   });
 }
 
@@ -2274,12 +2413,13 @@ function drawFloatingTexts() {
     const t = clamp(ft.life / ft.maxLife, 0, 1);
     ctx.globalAlpha = t;
     // leve crecimiento al aparecer y achique al final, para que se sienta vivo
-    const scale = 0.85 + 0.15 * Math.min(1, (ft.maxLife - ft.life) / 0.15) * t + (1 - t) * 0.1;
+    const scale = (0.85 + 0.15 * Math.min(1, (ft.maxLife - ft.life) / 0.15) * t + (1 - t) * 0.1) * (ft.scaleMul || 1);
     ctx.save();
     ctx.translate(ft.x, ft.y);
     ctx.scale(scale, scale);
-    ctx.fillStyle = CONFIG.pickup.color;
-    ctx.shadowColor = CONFIG.pickup.color;
+    const color = ft.color || CONFIG.pickup.color;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
     ctx.shadowBlur = 6;
     ctx.fillText(ft.text, 0, 0);
     ctx.restore();
@@ -2486,6 +2626,7 @@ function draw() {
   drawBossHealthBar();
   drawPickups();
   drawTriplePickups();
+  drawGoldenBee();
   drawBullets();
   drawShield();
   drawPlayer();
@@ -2713,6 +2854,42 @@ function drawTriplePickups() {
     ctx.fillText('BYTES', cx, cy - 5);
     ctx.fillText('CREATIVOS', cx, cy + 5);
   }
+  ctx.restore();
+}
+
+// Mezcla suave entre dos colores hex ('#rrggbb'), t de 0 a 1 — se usa
+// para que el parpadeo de la abeja dorada sea un degradé, no un salto.
+function lerpHexColor(colorA, colorB, t) {
+  const a = parseInt(colorA.slice(1), 16);
+  const b = parseInt(colorB.slice(1), 16);
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1)}`;
+}
+
+// Abeja dorada "premio": usa el sprite normal de abeja (chica), pero con
+// un tinte que va mezclándose despacio entre varios tonos dorados/blanco
+// (parpadeo suave, sin saltos, para que se note que es especial) y un
+// brillo alrededor.
+function drawGoldenBee() {
+  const gb = state.goldenBee;
+  if (!gb) return;
+  const cfg = CONFIG.goldenBee;
+  const t = performance.now() / 1000;
+  const colors = cfg.blinkColors;
+  const phase = (t * cfg.blinkSpeed) % colors.length;
+  const idx = Math.floor(phase);
+  const frac = phase - idx;
+  const tintColor = lerpHexColor(colors[idx], colors[(idx + 1) % colors.length], frac);
+  const wiggle = Math.sin(t * 3.2) * 0.06;
+
+  ctx.save();
+  ctx.shadowColor = '#ffd23f';
+  ctx.shadowBlur = 10 + Math.sin(t * cfg.blinkSpeed) * 4;
+  drawTintedSpriteCentered(sprites.beeSmall, gb.x + gb.w / 2, gb.y + gb.h / 2, gb.w * 1.3, tintColor, 0.7, wiggle);
   ctx.restore();
 }
 
