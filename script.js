@@ -70,6 +70,12 @@ const CONFIG = {
     speed: 13,            // velocidad lateral de la formación (px/s) — despacio
     dropOnEdge: 3,        // bajoncito extra al tocar un borde
     creepSpeed: 3.2,       // descenso lento y CONTINUO de toda la formación (px/s)
+    // Apenas la primera fila (la más cercana al jugador) llega a esta
+    // altura, TODO el grupo pasa junto al modo enjambre (ver
+    // updateFormation). Se mide relativo a la punta del avión
+    // (state.player.y): 0 = justo ahí, negativo = un poquito antes de
+    // llegar. Nunca depende de una sola abeja suelta.
+    stormTriggerOffset: -10,
   },
 
   diveSpeed: 150,         // velocidad de un enemigo en picada
@@ -1149,14 +1155,19 @@ function updateFormation(dt) {
     f.offsetY += CONFIG.enemyMarch.dropOnEdge;
   }
 
-  // Cuando la formación toca el suelo, en vez de quedarse girando en el
-  // centro, pasa al modo enjambre: se dispersa mitad a la izquierda y
-  // mitad a la derecha, y después vuelve a bajar rápido y disperso
-  // desde arriba (ver enterStormMode / updateStormEnemy).
+  // Cuando la PRIMERA FILA de la formación (la más cercana al jugador)
+  // llega a la altura de la punta del avión, TODO el grupo pasa junto
+  // al modo enjambre: se dispersa mitad a la izquierda y mitad a la
+  // derecha, y después vuelve a bajar rápido y disperso desde arriba
+  // (ver enterStormMode / updateStormEnemy). Usamos la posición real del
+  // avión (state.player.y) en vez de un número fijo de píxeles, para que
+  // quede claro y ajustable que el disparador es "llegar a la punta del
+  // avión" y no "tocar literalmente el fondo de la pantalla".
+  const stormTriggerY = state.player.y + CONFIG.enemyMarch.stormTriggerOffset;
   let anyTouchingFloor = false;
   for (const e of alive) {
     const screenY = e.baseY + f.offsetY;
-    if (screenY > CONFIG.canvasH - 40) {
+    if (screenY > stormTriggerY) {
       anyTouchingFloor = true;
       break;
     }
@@ -1305,11 +1316,11 @@ function updateDiveWaves(dt) {
     // tardando muchísimo en volver a aparecer en pantalla (el bug de
     // "la pantalla queda vacía y después de un rato aparecen").
 const large = state.enemies.filter(
-  e => e.alive && !e.diving && !e.returning && !e.storm && e.type === "large"
+  e => e.alive && !e.diving && !e.returning && !e.storm && e.type === "g"
 );
 
 const others = state.enemies.filter(
-  e => e.alive && !e.diving && !e.returning && !e.storm && e.type !== "large"
+  e => e.alive && !e.diving && !e.returning && !e.storm && e.type !== "g"
 );
 
 const candidates = [...large, ...large, ...large, ...others];
