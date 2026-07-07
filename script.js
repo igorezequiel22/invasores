@@ -16,6 +16,18 @@ const CONFIG = {
     shootDelay: 0.38,  // segundos entre disparos
     lives: 3,
     color: 'var-cyan',
+    // Distancia mínima (en px) que se mantiene siempre entre la punta del
+    // avión y la fila de abejas más cercana cuando el jugador sube la
+    // nave. Evita que, al subir, choque sin querer contra la formación.
+    enemySafeGap: 26,
+    // Altura FIJA de referencia ("posición de reposo" del avión), usada
+    // por el disparador del enjambre para no depender de dónde esté la
+    // nave en cada momento (ver updateFormation). OJO: tiene que ser el
+    // mismo valor que se usa más abajo para armar state.player.y
+    // (CONFIG.canvasH - 50) — no se puede escribir "CONFIG.canvasH - 50"
+    // acá directamente porque en este punto CONFIG todavía se está
+    // construyendo y aún no existe como variable.
+    baseY: 560 - 50,
   },
 
   bullet: {
@@ -191,6 +203,30 @@ const CONFIG = {
     refillMin: 0.12,           // demora mínima entre una abeja nueva y la siguiente al rellenar
     refillMax: 0.3,            // demora máxima (para que no aparezcan en el mismo instante exacto)
     speedBoostMultiplier: 1.015, // ~1.5% más rápido una vez eliminada la mitad de las que entraron al modo enjambre
+  },
+
+  // Una vez que el modo enjambre arranca (ver stormDive de arriba), las
+  // abejas van rotando entre TRES movimientos distintos, cada uno dura
+  // "phaseDuration" segundos y después pasa al siguiente, en bucle, hasta
+  // que se eliminan todas (recién ahí puede aparecer el jefe):
+  //   1) "circle" — vuelan todas juntas en círculo como un enjambre,
+  //      disparando seguido (al menos "circleShotsPerSecond" disparos
+  //      por segundo entre todas).
+  //   2) "sweep"  — aparecen por la izquierda, en fila ordenada de arriba
+  //      a abajo pero separadas entre sí, y cruzan volando hacia la
+  //      derecha disparando.
+  //   3) "dive"   — la picada de siempre desde arriba, de a 2 o 3,
+  //      disparando (usa la configuración de stormDive de arriba).
+  stormMacro: {
+    phaseDuration: 3,          // segundos que dura cada movimiento antes de pasar al próximo
+    circleShotsPerSecond: 4,   // disparos mínimos por segundo durante el enjambre circular (entre todas las abejas)
+    circleRadiusMin: 40,
+    circleRadiusMax: 110,
+    circleAngularSpeedMin: 1.2, // rad/s
+    circleAngularSpeedMax: 2.2,
+    sweepSpeed: 150,            // px/s de desplazamiento horizontal durante el barrido
+    sweepShotMin: 0.5,          // demora mínima entre disparos propios de cada abeja durante el barrido
+    sweepShotMax: 1.1,
   },
 
   // Animación de entrada al arrancar una partida nueva: la nave sube
@@ -810,6 +846,9 @@ function resetGame() {
     stormConcurrentTarget: 0, // cuántas abejas queremos viendo caer a la vez (2 o 3, se resortea solo)
     stormRefillTimer: 0,      // demora antes de sumar la próxima abeja al rellenar el cupo
     stormSpeedBoost: false,   // true cuando ya se eliminó la mitad de las abejas del enjambre (bajan más rápido)
+    stormMacroPhase: null,    // 'circle' | 'sweep' | 'dive' — cuál de los 3 movimientos está activo ahora
+    stormMacroTimer: 0,       // segundos que quedan del movimiento actual antes de pasar al siguiente
+    stormCircleShotTimer: 0,  // reloj compartido que garantiza los disparos/seg del movimiento "circle"
     playerExiting: false, // true cuando el avión se va hacia arriba después de ganar
     playerExitTimer: 0,   // tiempo de salida del avión
   };
@@ -1102,12 +1141,30 @@ function updatePlayer(dt) {
   p.x = clamp(p.x, 8, CONFIG.canvasW - p.w - 8);
 
   // Movimiento vertical (además del horizontal de siempre): la nave se
-  // puede mover hacia arriba/abajo dentro de la mitad inferior de la
-  // pantalla, sin meterse en la zona de la formación de abejas (o del
-  // jefe), para no romper el balance del juego.
+  // puede mover hacia arriba/abajo, pero el límite de "hasta dónde puede
+  // subir" NO es un número fijo de pantalla: se calcula según qué tan
+  // cerca esté la fila de adelante de las abejas en ESTE momento. Si las
+  // abejas están arriba de todo, puede subir bastante; a medida que
+  // bajan, el límite baja con ellas; y si se elimina toda la primera
+  // fila, el límite pasa a tomar la fila que quedó (la nueva "primera
+  // fila"), permitiendo subir un poco más. Así nunca puede chocarlas
+  // subiendo de más, sea cual sea la situación.
   if (state.keys['ArrowUp'] || state.keys['KeyW'])   p.y -= speed;
   if (state.keys['ArrowDown'] || state.keys['KeyS']) p.y += speed;
-  p.y = clamp(p.y, CONFIG.canvasH * 0.5, CONFIG.canvasH - p.h - 8);
+
+  const f = state.formation;
+  const marching = state.enemies.filter(
+    e => e.alive && !e.diving && !e.returning && !e.storm
+  );
+  let minY = CONFIG.canvasH * 0.5; // valor por defecto si no hay formación marchando (p. ej. modo enjambre o jefe)
+  if (marching.length > 0) {
+    const frontRowY = Math.max(...marching.map(e => e.baseY + f.offsetY));
+    minY = frontRowY + CONFIG.player.enemySafeGap;
+  }
+  // Por las dudas nunca dejamos que el límite empuje al avión más abajo
+  // del límite inferior normal, ni más arriba de un tope absoluto de seguridad.
+  minY = clamp(minY, CONFIG.canvasH * 0.12, CONFIG.canvasH - p.h - 8);
+  p.y = clamp(p.y, minY, CONFIG.canvasH - p.h - 8);
 
   p.shootCooldown -= dt;
   if ((state.keys['Space']) && p.shootCooldown <= 0) {
@@ -1157,13 +1214,15 @@ function updateFormation(dt) {
 
   // Cuando la PRIMERA FILA de la formación (la más cercana al jugador)
   // llega a la altura de la punta del avión, TODO el grupo pasa junto
-  // al modo enjambre: se dispersa mitad a la izquierda y mitad a la
-  // derecha, y después vuelve a bajar rápido y disperso desde arriba
-  // (ver enterStormMode / updateStormEnemy). Usamos la posición real del
-  // avión (state.player.y) en vez de un número fijo de píxeles, para que
-  // quede claro y ajustable que el disparador es "llegar a la punta del
-  // avión" y no "tocar literalmente el fondo de la pantalla".
-  const stormTriggerY = state.player.y + CONFIG.enemyMarch.stormTriggerOffset;
+  // al modo enjambre. OJO: esto usa una altura FIJA de pantalla
+  // (CONFIG.player.baseY, la posición de reposo del avión), y NO la
+  // posición actual del avión (state.player.y). Como ahora la nave se
+  // puede mover verticalmente, si usáramos su posición en vivo, subir
+  // la nave hacia las abejas activaría el enjambre por sí solo (como si
+  // hubiesen "bajado"), aunque las abejas no se movieron nada. Con una
+  // altura fija, el disparador depende solo de que las abejas bajen,
+  // nunca de que el avión se acerque.
+  const stormTriggerY = CONFIG.player.baseY + CONFIG.enemyMarch.stormTriggerOffset;
   let anyTouchingFloor = false;
   for (const e of alive) {
     const screenY = e.baseY + f.offsetY;
@@ -1174,8 +1233,11 @@ function updateFormation(dt) {
   }
   
   // Si detectamos que toca el suelo, marcar todas para el modo enjambre
+  // y arrancar el ciclo de 3 movimientos por el primero ("circle").
   if (anyTouchingFloor && !state.formationToStorm) {
     state.formationToStorm = true;
+    state.stormMacroPhase = 'circle';
+    state.stormMacroTimer = CONFIG.stormMacro.phaseDuration;
   }
   
   // Pasar todas las abejas de la formación al modo enjambre a la vez.
@@ -1191,8 +1253,9 @@ function updateFormation(dt) {
 // Hace que una abeja pase al modo "enjambre": primero se dispersa hacia
 // su costado (izquierda si estaba del lado izquierdo de la pantalla,
 // derecha si estaba del lado derecho) como desapareciendo de la
-// pantalla. Al salir de cámara queda "en cola" (ver updateStormReleases)
-// hasta que le toca reaparecer junto con su grupo de 2 o 3.
+// pantalla. Al salir de cámara, se acomoda en el movimiento que esté
+// activo en ese momento (círculo, barrido o picada — ver
+// initStormSubPhase / updateStormMacro).
 function enterStormMode(e) {
   const cfg = CONFIG.stormDive;
   e.storm = true;
@@ -1202,12 +1265,94 @@ function enterStormMode(e) {
   e.scatterSpeed = cfg.scatterSpeed * (0.85 + Math.random() * 0.3);
 }
 
+// Acomoda a una abeja (que ya terminó de dispersarse hacia el costado,
+// o que ya estaba en otro movimiento) dentro del movimiento indicado:
+// 'circle' (enjambre circular), 'sweep' (barrido de izquierda a
+// derecha) o 'dive' (picada de siempre desde arriba, de a 2 o 3).
+function initStormSubPhase(e, phase) {
+  const mc = CONFIG.stormMacro;
+  if (phase === 'sweep') {
+    e.stormPhase = 'sweepWait';
+    // Fila propia (de arriba a abajo) para que aparezcan ordenadas por
+    // altura pero separadas entre sí, no todas apelotonadas.
+    e.sweepRow = Math.floor(Math.random() * 6);
+    e.y = 40 + e.sweepRow * 26 + Math.random() * 8;
+    e.x = -30 - Math.random() * 220; // escalonadas: no todas entran a la vez
+    e.sweepDelay = Math.random() * 1.2;
+    e.stormShotTimer = mc.sweepShotMin + Math.random() * (mc.sweepShotMax - mc.sweepShotMin);
+  } else if (phase === 'circle') {
+    e.stormPhase = 'circle';
+    e.circleCenterX = CONFIG.canvasW / 2 + (Math.random() - 0.5) * 60;
+    e.circleCenterY = 90 + Math.random() * 50;
+    e.circleRadius = mc.circleRadiusMin + Math.random() * (mc.circleRadiusMax - mc.circleRadiusMin);
+    e.circleAngle = Math.random() * Math.PI * 2;
+    const angSpeed = mc.circleAngularSpeedMin + Math.random() * (mc.circleAngularSpeedMax - mc.circleAngularSpeedMin);
+    e.circleAngularSpeed = angSpeed * (Math.random() < 0.5 ? -1 : 1);
+  } else {
+    // 'dive' — vuelve al sistema de picada de siempre: espera en cola,
+    // oculta, hasta que le toque su turno de a 2 o 3 (updateStormReleases).
+    e.stormPhase = 'queued';
+    e.y = -9999;
+  }
+}
+
+// Maneja el ciclo de los 3 movimientos (circle -> sweep -> dive -> circle
+// -> ...), cada uno durando CONFIG.stormMacro.phaseDuration segundos, y
+// reacomoda a todas las abejas activas del enjambre cuando toca cambiar
+// de movimiento. Las que están en pleno 'scatter' (recién saliendo de la
+// formación) no se tocan acá: terminan su dispersión solas y se acomodan
+// al movimiento que esté vigente en ese momento (ver 'scatter' en
+// updateStormEnemy).
+function updateStormMacro(dt) {
+  if (!state.formationToStorm || !state.stormMacroPhase) return;
+
+  const anyStormAlive = state.enemies.some(e => e.alive && e.storm);
+  if (!anyStormAlive) return; // ya no quedan abejas del enjambre (puede aparecer el jefe)
+
+  state.stormMacroTimer -= dt;
+  if (state.stormMacroTimer <= 0) {
+    const order = ['circle', 'sweep', 'dive'];
+    const idx = order.indexOf(state.stormMacroPhase);
+    state.stormMacroPhase = order[(idx + 1) % order.length];
+    state.stormMacroTimer = CONFIG.stormMacro.phaseDuration;
+
+    const active = state.enemies.filter(e => e.alive && e.storm && e.stormPhase !== 'scatter');
+    for (const e of active) {
+      initStormSubPhase(e, state.stormMacroPhase);
+    }
+  }
+
+  // Movimiento "circle": reloj COMPARTIDO entre todas las abejas del
+  // enjambre para garantizar al menos circleShotsPerSecond disparos por
+  // segundo en total, sin importar cuántas abejas queden vivas.
+  if (state.stormMacroPhase === 'circle') {
+    const circleBees = state.enemies.filter(e => e.alive && e.storm && e.stormPhase === 'circle');
+    if (circleBees.length > 0) {
+      state.stormCircleShotTimer -= dt;
+      if (state.stormCircleShotTimer <= 0) {
+        const shooter = circleBees[Math.floor(Math.random() * circleBees.length)];
+        state.enemyBullets.push({
+          x: shooter.x + shooter.w / 2 - CONFIG.enemyBullet.width / 2,
+          y: shooter.y + shooter.h,
+          w: CONFIG.enemyBullet.width,
+          h: CONFIG.enemyBullet.height,
+          ...aimedBulletVelocity(shooter.x + shooter.w / 2, shooter.y + shooter.h),
+        });
+        state.stormCircleShotTimer = 1 / CONFIG.stormMacro.circleShotsPerSecond;
+      }
+    }
+  }
+}
+
 // Mantiene siempre 2 o 3 abejas cayendo a la vez: apenas alguna de las
 // que estaban cayendo se elimina o termina de cruzar la pantalla, suma
 // una nueva desde la cola (con una demora chiquita para que no aparezcan
 // en el mismo instante exacto). Así nunca queda la pantalla vacía ni se
 // hace esperar una tanda: en todo momento hay abejas bajando, de a 2 o
 // de a 3, hasta que se eliminan todas — recién ahí puede aparecer el jefe.
+// (Esto solo suma abejas de a 2-3 cuando el movimiento activo es 'dive';
+// en los otros dos movimientos no hay ninguna en 'queued', así que no
+// hace nada.)
 function updateStormReleases(dt) {
   const cfg = CONFIG.stormDive;
 
@@ -1253,22 +1398,56 @@ function activateStormDive(e) {
 }
 
 // Actualiza una abeja que ya está en modo "enjambre", a través de sus
-// fases: 'scatter' (se va al costado y desaparece de pantalla), 'queued'
-// (espera oculta, fuera de cámara, a que el manager la sume al cupo de
-// 2-3 que están cayendo) y 'dive' (baja rápido disparando). Al llegar
-// abajo vuelve a 'queued' y espera su turno de nuevo — así siempre hay
-// abejas bajando, de a 2 o 3, sin huecos ni pantalla vacía, hasta que se
-// eliminan todas.
+// fases: 'scatter' (se va al costado y desaparece de pantalla), y luego,
+// según el movimiento vigente del ciclo (ver updateStormMacro):
+//   'circle'   — vuela en círculo alrededor de un centro, disparando
+//                (el disparo real lo maneja el reloj compartido de
+//                updateStormMacro, acá solo se mueve).
+//   'sweepWait'/'sweep' — espera un poco y después cruza volando de
+//                izquierda a derecha en su fila, disparando de a poco.
+//   'queued'/'dive' — el sistema de picada de siempre: espera oculta y
+//                cae rápido de a 2 o 3 cuando le toca el turno.
 function updateStormEnemy(e, dt) {
   const cfg = CONFIG.stormDive;
+  const mc = CONFIG.stormMacro;
 
   if (e.stormPhase === 'scatter') {
     e.x += e.scatterDir * e.scatterSpeed * dt;
     const offLeft = e.x + e.w < -10;
     const offRight = e.x > CONFIG.canvasW + 10;
     if (offLeft || offRight) {
-      e.stormPhase = 'queued';
-      e.y = -9999; // oculta, fuera de cámara, esperando que le toque su turno
+      // Termina de dispersarse: se acomoda en el movimiento que esté
+      // vigente ahora mismo (si por algún motivo todavía no hay uno
+      // asignado, arranca por 'circle', el primero del ciclo).
+      initStormSubPhase(e, state.stormMacroPhase || 'circle');
+    }
+  } else if (e.stormPhase === 'circle') {
+    e.circleAngle += e.circleAngularSpeed * dt;
+    e.x = e.circleCenterX + Math.cos(e.circleAngle) * e.circleRadius - e.w / 2;
+    e.y = e.circleCenterY + Math.sin(e.circleAngle) * e.circleRadius * 0.6;
+  } else if (e.stormPhase === 'sweepWait') {
+    e.sweepDelay -= dt;
+    if (e.sweepDelay <= 0) {
+      e.stormPhase = 'sweep';
+    }
+  } else if (e.stormPhase === 'sweep') {
+    e.x += mc.sweepSpeed * dt;
+    e.stormShotTimer -= dt;
+    if (e.stormShotTimer <= 0) {
+      state.enemyBullets.push({
+        x: e.x + e.w / 2 - CONFIG.enemyBullet.width / 2,
+        y: e.y + e.h,
+        w: CONFIG.enemyBullet.width,
+        h: CONFIG.enemyBullet.height,
+        ...aimedBulletVelocity(e.x + e.w / 2, e.y + e.h),
+      });
+      e.stormShotTimer = mc.sweepShotMin + Math.random() * (mc.sweepShotMax - mc.sweepShotMin);
+    }
+    if (e.x > CONFIG.canvasW + 30) {
+      // Termina de cruzar: vuelve a entrar por la izquierda, en su misma
+      // fila, y sigue así mientras dure el movimiento de barrido.
+      e.x = -30 - Math.random() * 150;
+      e.y = 40 + e.sweepRow * 26 + Math.random() * 8;
     }
   } else if (e.stormPhase === 'queued') {
     // No hace nada: el manager (updateStormReleases) la elige cuando
@@ -1406,6 +1585,7 @@ function aimedBulletVelocity(fromX, fromY) {
 function updateEnemies(dt) {
   const f = state.formation;
   updateDiveWaves(dt);
+  updateStormMacro(dt);
   updateStormReleases(dt);
 
   for (const e of state.enemies) {
