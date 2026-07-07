@@ -1295,13 +1295,21 @@ function updateDiveWaves(dt) {
   state.diveWaveTimer -= dt;
   if (state.diveWaveTimer <= 0) {
     // Candidatas: todas las abejas (grandes y chicas) que estén tranquilas
-    // en la formación (ni picando ni volviendo)
+    // en la formación (ni picando, ni volviendo, ni ya en modo enjambre).
+    // OJO: hay que excluir también "storm" porque si no, este sistema de
+    // oleadas "viejo" agarra abejas que ya están escondidas esperando su
+    // turno en el enjambre (y = -9999) y les mete un startDive() encima.
+    // Eso las deja con e.diving = true mientras su e.storm también sigue
+    // true, y como el loop principal revisa "diving" ANTES que "storm",
+    // la abeja queda cayendo desde esa posición escondida bien arriba,
+    // tardando muchísimo en volver a aparecer en pantalla (el bug de
+    // "la pantalla queda vacía y después de un rato aparecen").
 const large = state.enemies.filter(
-  e => e.alive && !e.diving && !e.returning && e.type === "large"
+  e => e.alive && !e.diving && !e.returning && !e.storm && e.type === "large"
 );
 
 const others = state.enemies.filter(
-  e => e.alive && !e.diving && !e.returning && e.type !== "large"
+  e => e.alive && !e.diving && !e.returning && !e.storm && e.type !== "large"
 );
 
 const candidates = [...large, ...large, ...large, ...others];
@@ -1350,7 +1358,11 @@ const candidates = [...large, ...large, ...large, ...others];
   }
   state.diveQueue = state.diveQueue.filter(item => {
     if (item.delay > 0) return true;
-    if (item.enemy.alive && !item.enemy.diving && !item.enemy.returning) {
+    // Chequeamos también "!item.enemy.storm" acá: si mientras esta abeja
+    // esperaba su turno en la cola de la oleada vieja, la formación tocó
+    // el piso y pasó a modo enjambre, no hay que secuestrarla con un
+    // startDive() (ver el comentario grande más arriba, en "candidates").
+    if (item.enemy.alive && !item.enemy.diving && !item.enemy.returning && !item.enemy.storm) {
       startDive(item.enemy);
     }
     return false;
