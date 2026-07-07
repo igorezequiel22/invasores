@@ -19,7 +19,7 @@
 
 ## Descripción
 
-**Invasores** es un videojuego arcade *Shoot 'Em Up* desarrollado en **HTML, CSS y JavaScript puro**, con estética pixel art inspirada en los clásicos del género. Controlá tu nave, derrotá oleadas de enemigos, sumá power-ups y competí por el primer puesto en una tabla de puntuaciones global.
+Videojuego arcade *Shoot 'Em Up* desarrollado en **HTML, CSS y JavaScript puro**, con estética pixel art inspirada en los clásicos del género. Controlá tu nave, derrotá oleadas de enemigos, sumá power-ups y competí por el primer puesto en una tabla de puntuaciones global.
 
 Al finalizar cada partida, una **IA analiza tu desempeño y genera un comentario personalizado**, y tu score queda registrado en tiempo real gracias a **Supabase**.
 
