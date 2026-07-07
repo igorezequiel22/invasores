@@ -19,6 +19,39 @@
 const SCORES_KEY = 'invasores:scores';
 const MAX_KEEP = 50; // no hace falta guardar miles de partidas viejas
 
+// Según cómo haya quedado conectada la integración de Upstash en
+// Vercel, las variables de entorno pueden terminar con nombres algo
+// distintos (a veces Vercel mete un prefijo propio, a veces agrega
+// "KV" en el medio, etc). Para no depender de acertarle al nombre
+// exacto, probamos varios nombres candidatos y nos quedamos con el
+// primero que exista.
+function firstEnv(names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value) return value;
+  }
+  return null;
+}
+
+const RESTURL_CANDIDATES = [
+  'UPSTASH_REDIS_REST_URL',
+  'UPSTASH_REDIS_REST_REST_URL',
+  'UPSTASH_REDIS_REST_KV_REST_API_URL',
+  'KV_REST_API_URL',
+  'STORAGE_URL',
+  'STORAGE_KV_REST_API_URL',
+  'STORAGE_REST_API_URL',
+];
+const RESTTOKEN_CANDIDATES = [
+  'UPSTASH_REDIS_REST_TOKEN',
+  'UPSTASH_REDIS_REST_REST_TOKEN',
+  'UPSTASH_REDIS_REST_KV_REST_API_TOKEN',
+  'KV_REST_API_TOKEN',
+  'STORAGE_TOKEN',
+  'STORAGE_KV_REST_API_TOKEN',
+  'STORAGE_REST_API_TOKEN',
+];
+
 async function redisCommand(restUrl, restToken, command) {
   const response = await fetch(`${restUrl}/pipeline`, {
     method: 'POST',
@@ -33,8 +66,8 @@ async function redisCommand(restUrl, restToken, command) {
 }
 
 export default async function handler(req, res) {
-  const restUrl = process.env.UPSTASH_REDIS_REST_URL;
-  const restToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const restUrl = firstEnv(RESTURL_CANDIDATES);
+  const restToken = firstEnv(RESTTOKEN_CANDIDATES);
   if (!restUrl || !restToken) {
     res.status(500).json({ error: 'Falta configurar UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN en Vercel' });
     return;
