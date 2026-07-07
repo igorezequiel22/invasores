@@ -176,57 +176,32 @@ const CONFIG = {
     retryDelay: 0.6,   // si no hay lugar/candidatas, reintenta lanzar oleada tras este ratito
   },
 
-  // Cuando la formación (o alguna abeja) toca el fondo de la pantalla, en
-  // vez de quedarse girando en el centro, las abejas se dispersan: la
-  // mitad hacia la izquierda y la mitad hacia la derecha, como
-  // desapareciendo de la pantalla. Después reaparecen arriba y bajan
-  // rápido disparando, de forma dispersa (nunca todas juntas), dando la
-  // sensación de que la nave vuela hacia adelante atravesando el
-  // enjambre. Esto se repite en bucle sin perder ninguna abeja: la
-  // cantidad total se mantiene igual a la que había en ese momento.
-  // Cuando la formación (o alguna abeja) toca el fondo de la pantalla, en
-  // vez de quedarse girando en el centro, las abejas se dispersan: la
-  // mitad hacia la izquierda y la mitad hacia la derecha, como
-  // desapareciendo de la pantalla. Después reaparecen arriba y bajan
-  // rápido disparando, siempre de a 2 o 3 a la vez (nunca todas juntas,
-  // pero tampoco dejando la pantalla vacía) hasta que se eliminan todas
-  // — ahí recién puede aparecer el jefe. La cantidad total se mantiene
-  // igual a la que había en el momento en que tocaron el piso.
-  stormDive: {
-    scatterSpeed: 300,     // velocidad con la que se van a los costados (px/s)
-    diveSpeed: 260,        // velocidad de la picada rápida desde arriba (px/s)
-    driftMax: 70,          // desvío horizontal leve durante la picada (px/s)
-    startAboveMin: 20,     // cuánto arriba de la pantalla espera (fuera de cámara)
-    startAboveMax: 160,
-    concurrentMin: 2,          // como mínimo se ven cayendo 2 a la vez...
-    concurrentMax: 3,          // ...o 3, variando cada vez que se rellena el cupo
-    refillMin: 0.12,           // demora mínima entre una abeja nueva y la siguiente al rellenar
-    refillMax: 0.3,            // demora máxima (para que no aparezcan en el mismo instante exacto)
-    speedBoostMultiplier: 1.015, // ~1.5% más rápido una vez eliminada la mitad de las que entraron al modo enjambre
-  },
-
-  // Una vez que el modo enjambre arranca (ver stormDive de arriba), las
-  // abejas van rotando entre TRES movimientos distintos, cada uno dura
-  // "phaseDuration" segundos y después pasa al siguiente, en bucle, hasta
-  // que se eliminan todas (recién ahí puede aparecer el jefe):
-  //   1) "circle" — vuelan todas juntas en círculo como un enjambre,
-  //      disparando seguido (al menos "circleShotsPerSecond" disparos
-  //      por segundo entre todas).
-  //   2) "sweep"  — aparecen por la izquierda, en fila ordenada de arriba
-  //      a abajo pero separadas entre sí, y cruzan volando hacia la
-  //      derecha disparando.
-  //   3) "dive"   — la picada de siempre desde arriba, de a 2 o 3,
-  //      disparando (usa la configuración de stormDive de arriba).
-  stormMacro: {
-    phaseDuration: 3,          // segundos que dura cada movimiento antes de pasar al próximo
-    circleShotsPerSecond: 4,   // disparos mínimos por segundo durante el enjambre circular (entre todas las abejas)
-    circleRadiusMin: 40,
-    circleRadiusMax: 110,
-    circleAngularSpeedMin: 1.2, // rad/s
-    circleAngularSpeedMax: 2.2,
-    sweepSpeed: 150,            // px/s de desplazamiento horizontal durante el barrido
-    sweepShotMin: 0.5,          // demora mínima entre disparos propios de cada abeja durante el barrido
-    sweepShotMax: 1.1,
+  // Cuando la formación (o alguna abeja) toca el fondo de la pantalla —
+  // hasta donde llega la punta del avión, sin tocarlo ni tocar el suelo —
+  // TODAS las abejas pasan juntas al modo enjambre: vuelan derecho desde
+  // donde estén hasta acomodarse arriba, en un enjambre circular abierto
+  // que abarca de punta a punta de la pantalla (no comprimido en el
+  // centro). Ahí quedan volando cada una en su propio circulito
+  // (orgánico, tipo enjambre real), disparando entre todas a razón de
+  // "shotsPerSecond" disparos por segundo. Cada "diveInterval" segundos
+  // una sola abeja se despega a picar hacia abajo (hasta el mismo límite
+  // que activó el enjambre, sin tocar avión ni piso) y, apenas llega,
+  // vuelve derecho a su lugar en el enjambre. Un solo comportamiento,
+  // sin fases intermedias ni desapariciones.
+  swarm: {
+    marginX: 30,        // margen a los costados: el enjambre llega casi hasta las esquinas
+    topY: 30,           // altura mínima del enjambre (arriba de todo)
+    bottomY: 150,       // altura máxima (se mantiene arriba, no baja al medio de la pantalla)
+    personalRadiusMin: 14,  // radio del circulito propio de cada abeja alrededor de su lugar
+    personalRadiusMax: 34,
+    personalSpeedMin: 1.3,  // rad/s del circulito propio
+    personalSpeedMax: 2.6,
+    joinSpeed: 260,         // velocidad (px/s) al volar derecho hacia su lugar en el enjambre
+    shotsPerSecond: 3,      // disparos por segundo entre TODAS las abejas del enjambre
+    diveInterval: 2,        // cada cuántos segundos se despega una abeja a picar
+    diveSpeed: 300,         // velocidad (px/s) de la picada hacia abajo
+    diveReturnSpeed: 240,   // velocidad (px/s) al volver a su lugar en el enjambre
+    diveDepthPadding: 16,   // margen extra por encima del límite, para no tocar avión ni piso
   },
 
   // Animación de entrada al arrancar una partida nueva: la nave sube
@@ -279,6 +254,22 @@ let currentPlayerName = 'JUGADOR';
 // vuelve a pasar por la pantalla de instrucciones varias veces.
 let aiPredictedScore = null;
 let predictionToken = 0;
+
+// Historial de frases YA MOSTRADAS en este mismo navegador (mientras la
+// pestaña siga abierta, así sea a través de varias partidas seguidas —
+// típico de un stand de evento donde una persona tras otra juega sin
+// recargar la página). Se manda al servidor en cada pedido para que la
+// IA nunca repita una que ya vimos, y también se usa acá mismo para no
+// repetir las frases de reserva (fallback) entre sí.
+let recentBossTaunts = [];   // frases del jefe durante la pelea (todas las fases mezcladas)
+let recentGameoverTitles = []; // apodos de la pantalla de "fin de partida"
+let recentPredictLines = [];   // frases de "la máquina predice tu puntaje"
+
+function pushRecent(list, value, max = 8) {
+  if (!value) return;
+  list.push(value);
+  if (list.length > max) list.shift();
+}
 
 // ---------- HIGH SCORES (tabla compartida, vive en el servidor) ----------
 // Antes vivían solo en la memoria del navegador (se perdían al
@@ -645,7 +636,9 @@ function requestAiPrediction() {
   aiPredictedScore = fallback.predictedScore;
   aiPredictionEl.textContent = fallback.line;
   aiPredictionEl.classList.add('ai-comment--visible');
+  pushRecent(recentPredictLines, fallback.line);
 
+  const recentLinesSnapshot = recentPredictLines.slice();
   (async () => {
     try {
       const controller = new AbortController();
@@ -653,7 +646,7 @@ function requestAiPrediction() {
       const res = await fetch('/api/predict-score', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ playerName: nameForPrediction }),
+        body: JSON.stringify({ playerName: nameForPrediction, recentLines: recentLinesSnapshot }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -663,6 +656,9 @@ function requestAiPrediction() {
       if (data && data.line && data.predictedScore && looksSpanish(data.line)) {
         aiPredictionEl.textContent = data.line;
         aiPredictedScore = Number(data.predictedScore) || fallback.predictedScore;
+        const idx = recentPredictLines.lastIndexOf(fallback.line);
+        if (idx !== -1) recentPredictLines[idx] = data.line;
+        else pushRecent(recentPredictLines, data.line);
       }
       // Si vino vacío, incompleto o en otro idioma, se queda la
       // predicción de reserva que ya se está mostrando.
@@ -842,13 +838,10 @@ function resetGame() {
     entering: false,     // true mientras la nave/abejas se están acomodando al arrancar
     enterT: 0,           // tiempo transcurrido de la animación de entrada
     startTextTimer: 0,   // cuenta regresiva mostrando "START" antes de habilitar el juego
-    formationToStorm: false, // true cuando la formación debe pasar al modo enjambre (dispersión + picada continua)
-    stormConcurrentTarget: 0, // cuántas abejas queremos viendo caer a la vez (2 o 3, se resortea solo)
-    stormRefillTimer: 0,      // demora antes de sumar la próxima abeja al rellenar el cupo
-    stormSpeedBoost: false,   // true cuando ya se eliminó la mitad de las abejas del enjambre (bajan más rápido)
-    stormMacroPhase: null,    // 'circle' | 'sweep' | 'dive' — cuál de los 3 movimientos está activo ahora
-    stormMacroTimer: 0,       // segundos que quedan del movimiento actual antes de pasar al siguiente
-    stormCircleShotTimer: 0,  // reloj compartido que garantiza los disparos/seg del movimiento "circle"
+    formationToStorm: false, // true cuando la formación debe pasar al modo enjambre (llegó hasta la punta del avión)
+    swarmBounds: null,        // {minX,maxX,minY,maxY} de las posiciones base de la formación, para ubicar el enjambre de punta a punta
+    swarmShotTimer: 0,        // reloj compartido: garantiza los disparos/seg del enjambre entre todas las abejas
+    swarmDiveTimer: 0,        // cuenta regresiva para que la próxima abeja se despegue a picar
     playerExiting: false, // true cuando el avión se va hacia arriba después de ganar
     playerExitTimer: 0,   // tiempo de salida del avión
   };
@@ -878,13 +871,15 @@ function buildEnemyGrid() {
         damaged: false,
         diving: false,
         returning: false,
-        storm: false,        // true cuando la abeja pasó al modo enjambre (tras tocar el fondo)
-        stormPhase: '',      // 'scatter' -> 'wait' -> 'dive' (ver updateStormEnemy)
-        scatterDir: 0,       // -1 se dispersa por la izquierda, 1 por la derecha
-        scatterSpeed: 0,
-        stormVX: 0,          // leve desvío horizontal durante la picada rápida
-        stormT: 0,           // tiempo transcurrido en la fase de picada (para el disparo)
-        stormDelay: 0,       // demora antes de arrancar la próxima picada (dispersión temporal)
+        storm: false,        // true cuando la abeja pasó al modo enjambre (tras llegar hasta la punta del avión)
+        stormPhase: '',      // 'joining' -> 'circle' -> 'diving' -> 'returning' -> 'circle'... (ver updateStormEnemy)
+        anchorX: 0,          // lugar fijo (dentro del enjambre circular abierto) alrededor del cual orbita esta abeja
+        anchorY: 0,
+        circleRadius: 0,     // radio de su propio circulito alrededor de anchorX/anchorY
+        circleAngle: 0,
+        circleAngularSpeed: 0,
+        diveTargetX: 0,      // adónde pica (una vez por vez, ver startSwarmDive)
+        diveTargetY: 0,
         hasShotStorm: false,
         lastShot: Math.random() * 2,
         hasShot: false,
@@ -896,6 +891,26 @@ function buildEnemyGrid() {
       });
     });
   });
+  computeFormationBounds();
+}
+
+// Calcula el rectángulo (minX/maxX/minY/maxY) que ocupan las posiciones
+// BASE de la formación (columna/fila original de cada abeja, sin importar
+// si está viva o no). Se usa para ubicar a cada abeja dentro del enjambre
+// circular abierto de forma proporcional a su lugar original: las que
+// estaban más a la izquierda terminan orbitando cerca de la esquina
+// izquierda, las de más arriba cerca del techo, etc. Así el enjambre
+// siempre abarca de punta a punta de la pantalla, sin apelotonarse en el
+// centro, sea cual sea la cantidad de abejas que queden.
+function computeFormationBounds() {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const e of state.enemies) {
+    if (e.baseX < minX) minX = e.baseX;
+    if (e.baseX > maxX) maxX = e.baseX;
+    if (e.baseY < minY) minY = e.baseY;
+    if (e.baseY > maxY) maxY = e.baseY;
+  }
+  state.swarmBounds = { minX, maxX, minY, maxY };
 }
 
 function makeStarfield(n) {
@@ -1232,12 +1247,13 @@ function updateFormation(dt) {
     }
   }
   
-  // Si detectamos que toca el suelo, marcar todas para el modo enjambre
-  // y arrancar el ciclo de 3 movimientos por el primero ("circle").
+  // Si detectamos que toca el fondo (la punta del avión), activamos el
+  // modo enjambre: todas las abejas vuelan juntas hacia su lugar en el
+  // enjambre circular abierto (ver enterStormMode / updateSwarm).
   if (anyTouchingFloor && !state.formationToStorm) {
     state.formationToStorm = true;
-    state.stormMacroPhase = 'circle';
-    state.stormMacroTimer = CONFIG.stormMacro.phaseDuration;
+    state.swarmShotTimer = 0;
+    state.swarmDiveTimer = CONFIG.swarm.diveInterval;
   }
   
   // Pasar todas las abejas de la formación al modo enjambre a la vez.
@@ -1250,215 +1266,127 @@ function updateFormation(dt) {
   }
 }
 
-// Hace que una abeja pase al modo "enjambre": primero se dispersa hacia
-// su costado (izquierda si estaba del lado izquierdo de la pantalla,
-// derecha si estaba del lado derecho) como desapareciendo de la
-// pantalla. Al salir de cámara, se acomoda en el movimiento que esté
-// activo en ese momento (círculo, barrido o picada — ver
-// initStormSubPhase / updateStormMacro).
+// Hace que una abeja pase al modo "enjambre": le asigna un lugar fijo
+// (anchorX/anchorY) dentro del enjambre circular abierto, calculado a
+// partir de su posición ORIGINAL en la formación (baseX/baseY), para que
+// el enjambre siempre quede repartido de punta a punta de la pantalla
+// (las que estaban más a la izquierda orbitan cerca de la esquina
+// izquierda, las de arriba cerca del techo, etc.) y nunca apelotonado en
+// el centro. La abeja vuela derecho desde donde esté hasta ese lugar
+// (fase 'joining', ver updateStormEnemy) — nada de dispersarse a los
+// costados ni desaparecer de pantalla.
 function enterStormMode(e) {
-  const cfg = CONFIG.stormDive;
+  const cfg = CONFIG.swarm;
+  const b = state.swarmBounds;
   e.storm = true;
-  e.stormPhase = 'scatter';
-  const centerX = e.x + e.w / 2;
-  e.scatterDir = centerX < CONFIG.canvasW / 2 ? -1 : 1;
-  e.scatterSpeed = cfg.scatterSpeed * (0.85 + Math.random() * 0.3);
+  e.stormPhase = 'joining';
+  const tx = b.maxX > b.minX ? (e.baseX - b.minX) / (b.maxX - b.minX) : 0.5;
+  const ty = b.maxY > b.minY ? (e.baseY - b.minY) / (b.maxY - b.minY) : 0.5;
+  e.anchorX = cfg.marginX + tx * (CONFIG.canvasW - cfg.marginX * 2);
+  e.anchorY = cfg.topY + ty * (cfg.bottomY - cfg.topY);
+  e.circleRadius = cfg.personalRadiusMin + Math.random() * (cfg.personalRadiusMax - cfg.personalRadiusMin);
+  e.circleAngle = Math.random() * Math.PI * 2;
+  const angSpeed = cfg.personalSpeedMin + Math.random() * (cfg.personalSpeedMax - cfg.personalSpeedMin);
+  e.circleAngularSpeed = angSpeed * (Math.random() < 0.5 ? -1 : 1);
 }
 
-// Acomoda a una abeja (que ya terminó de dispersarse hacia el costado,
-// o que ya estaba en otro movimiento) dentro del movimiento indicado:
-// 'circle' (enjambre circular), 'sweep' (barrido de izquierda a
-// derecha) o 'dive' (picada de siempre desde arriba, de a 2 o 3).
-function initStormSubPhase(e, phase) {
-  const mc = CONFIG.stormMacro;
-  if (phase === 'sweep') {
-    e.stormPhase = 'sweepWait';
-    // Fila propia (de arriba a abajo) para que aparezcan ordenadas por
-    // altura pero separadas entre sí, no todas apelotonadas.
-    e.sweepRow = Math.floor(Math.random() * 6);
-    e.y = 40 + e.sweepRow * 26 + Math.random() * 8;
-    e.x = -30 - Math.random() * 220; // escalonadas: no todas entran a la vez
-    e.sweepDelay = Math.random() * 1.2;
-    e.stormShotTimer = mc.sweepShotMin + Math.random() * (mc.sweepShotMax - mc.sweepShotMin);
-  } else if (phase === 'circle') {
-    e.stormPhase = 'circle';
-    e.circleCenterX = CONFIG.canvasW / 2 + (Math.random() - 0.5) * 60;
-    e.circleCenterY = 90 + Math.random() * 50;
-    e.circleRadius = mc.circleRadiusMin + Math.random() * (mc.circleRadiusMax - mc.circleRadiusMin);
-    e.circleAngle = Math.random() * Math.PI * 2;
-    const angSpeed = mc.circleAngularSpeedMin + Math.random() * (mc.circleAngularSpeedMax - mc.circleAngularSpeedMin);
-    e.circleAngularSpeed = angSpeed * (Math.random() < 0.5 ? -1 : 1);
-  } else {
-    // 'dive' — vuelve al sistema de picada de siempre: espera en cola,
-    // oculta, hasta que le toque su turno de a 2 o 3 (updateStormReleases).
-    e.stormPhase = 'queued';
-    e.y = -9999;
-  }
-}
+// Maneja el enjambre como UN solo comportamiento (sin fases raras):
+// dispara entre todas a razón de "shotsPerSecond" disparos por segundo
+// (reloj compartido, para que sea parejo sin importar cuántas queden
+// vivas), y cada "diveInterval" segundos manda a UNA sola abeja del
+// enjambre (que esté tranquila orbitando) a despegarse y picar; mientras
+// esa no vuelva, no se manda otra.
+function updateSwarm(dt) {
+  if (!state.formationToStorm) return;
+  const stormBees = state.enemies.filter(e => e.alive && e.storm);
+  if (stormBees.length === 0) return;
+  const cfg = CONFIG.swarm;
 
-// Maneja el ciclo de los 3 movimientos (circle -> sweep -> dive -> circle
-// -> ...), cada uno durando CONFIG.stormMacro.phaseDuration segundos, y
-// reacomoda a todas las abejas activas del enjambre cuando toca cambiar
-// de movimiento. Las que están en pleno 'scatter' (recién saliendo de la
-// formación) no se tocan acá: terminan su dispersión solas y se acomodan
-// al movimiento que esté vigente en ese momento (ver 'scatter' en
-// updateStormEnemy).
-function updateStormMacro(dt) {
-  if (!state.formationToStorm || !state.stormMacroPhase) return;
-
-  const anyStormAlive = state.enemies.some(e => e.alive && e.storm);
-  if (!anyStormAlive) return; // ya no quedan abejas del enjambre (puede aparecer el jefe)
-
-  state.stormMacroTimer -= dt;
-  if (state.stormMacroTimer <= 0) {
-    const order = ['circle', 'sweep', 'dive'];
-    const idx = order.indexOf(state.stormMacroPhase);
-    state.stormMacroPhase = order[(idx + 1) % order.length];
-    state.stormMacroTimer = CONFIG.stormMacro.phaseDuration;
-
-    const active = state.enemies.filter(e => e.alive && e.storm && e.stormPhase !== 'scatter');
-    for (const e of active) {
-      initStormSubPhase(e, state.stormMacroPhase);
-    }
+  state.swarmShotTimer -= dt;
+  if (state.swarmShotTimer <= 0) {
+    const shooter = stormBees[Math.floor(Math.random() * stormBees.length)];
+    state.enemyBullets.push({
+      x: shooter.x + shooter.w / 2 - CONFIG.enemyBullet.width / 2,
+      y: shooter.y + shooter.h,
+      w: CONFIG.enemyBullet.width,
+      h: CONFIG.enemyBullet.height,
+      ...aimedBulletVelocity(shooter.x + shooter.w / 2, shooter.y + shooter.h),
+    });
+    state.swarmShotTimer = 1 / cfg.shotsPerSecond;
   }
 
-  // Movimiento "circle": reloj COMPARTIDO entre todas las abejas del
-  // enjambre para garantizar al menos circleShotsPerSecond disparos por
-  // segundo en total, sin importar cuántas abejas queden vivas.
-  if (state.stormMacroPhase === 'circle') {
-    const circleBees = state.enemies.filter(e => e.alive && e.storm && e.stormPhase === 'circle');
-    if (circleBees.length > 0) {
-      state.stormCircleShotTimer -= dt;
-      if (state.stormCircleShotTimer <= 0) {
-        const shooter = circleBees[Math.floor(Math.random() * circleBees.length)];
-        state.enemyBullets.push({
-          x: shooter.x + shooter.w / 2 - CONFIG.enemyBullet.width / 2,
-          y: shooter.y + shooter.h,
-          w: CONFIG.enemyBullet.width,
-          h: CONFIG.enemyBullet.height,
-          ...aimedBulletVelocity(shooter.x + shooter.w / 2, shooter.y + shooter.h),
-        });
-        state.stormCircleShotTimer = 1 / CONFIG.stormMacro.circleShotsPerSecond;
+  state.swarmDiveTimer -= dt;
+  if (state.swarmDiveTimer <= 0) {
+    const alreadyOut = stormBees.some(e => e.stormPhase === 'diving' || e.stormPhase === 'returning');
+    if (!alreadyOut) {
+      const candidates = stormBees.filter(e => e.stormPhase === 'circle');
+      if (candidates.length > 0) {
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        startSwarmDive(chosen);
+        state.swarmDiveTimer = cfg.diveInterval;
+      } else {
+        state.swarmDiveTimer = 0.2; // no había ninguna candidata todavía: reintenta pronto
       }
+    } else {
+      state.swarmDiveTimer = 0.2; // ya hay una picando: espera a que vuelva y reintenta pronto
     }
   }
 }
 
-// Mantiene siempre 2 o 3 abejas cayendo a la vez: apenas alguna de las
-// que estaban cayendo se elimina o termina de cruzar la pantalla, suma
-// una nueva desde la cola (con una demora chiquita para que no aparezcan
-// en el mismo instante exacto). Así nunca queda la pantalla vacía ni se
-// hace esperar una tanda: en todo momento hay abejas bajando, de a 2 o
-// de a 3, hasta que se eliminan todas — recién ahí puede aparecer el jefe.
-// (Esto solo suma abejas de a 2-3 cuando el movimiento activo es 'dive';
-// en los otros dos movimientos no hay ninguna en 'queued', así que no
-// hace nada.)
-function updateStormReleases(dt) {
-  const cfg = CONFIG.stormDive;
-
-  if (!state.stormConcurrentTarget) {
-    state.stormConcurrentTarget = cfg.concurrentMin + Math.floor(Math.random() * (cfg.concurrentMax - cfg.concurrentMin + 1));
-  }
-
-  const diving = state.enemies.filter(e => e.alive && e.storm && e.stormPhase === 'dive').length;
-  const waiting = state.enemies.filter(e => e.alive && e.storm && e.stormPhase === 'queued');
-
-  if (diving < state.stormConcurrentTarget && waiting.length > 0) {
-    state.stormRefillTimer -= dt;
-    if (state.stormRefillTimer <= 0) {
-      const e = waiting[Math.floor(Math.random() * waiting.length)];
-      activateStormDive(e);
-      state.stormRefillTimer = cfg.refillMin + Math.random() * (cfg.refillMax - cfg.refillMin);
-      // Cupo lleno: resorteamos el próximo objetivo (2 o 3) para variar.
-      if (diving + 1 >= state.stormConcurrentTarget) {
-        state.stormConcurrentTarget = cfg.concurrentMin + Math.floor(Math.random() * (cfg.concurrentMax - cfg.concurrentMin + 1));
-      }
-    }
-  }
-
-  // Dificultad: si ya se eliminó la mitad (o más) de las abejas que
-  // entraron al modo enjambre, las que quedan bajan un poco más rápido.
-  const totalStorm = state.enemies.filter(e => e.storm).length;
-  if (totalStorm > 0) {
-    const deadStorm = state.enemies.filter(e => e.storm && !e.alive).length;
-    state.stormSpeedBoost = deadStorm >= totalStorm / 2;
-  }
-}
-
-// Ubica a la abeja arriba de la pantalla y la manda a caer.
-function activateStormDive(e) {
-  const cfg = CONFIG.stormDive;
-  e.stormPhase = 'dive';
-  e.y = -(cfg.startAboveMin + Math.random() * (cfg.startAboveMax - cfg.startAboveMin));
-  e.x = 20 + Math.random() * (CONFIG.canvasW - 40 - e.w);
-  e.stormVX = (Math.random() - 0.5) * cfg.driftMax;
-  e.stormDelay = 0;
-  e.stormT = 0;
+// Despega a una sola abeja del enjambre para que pique hacia abajo, hasta
+// el mismo límite que activó el modo enjambre (la punta del avión), sin
+// llegar a tocarlo ni tocar el suelo.
+function startSwarmDive(e) {
+  const cfg = CONFIG.swarm;
+  e.stormPhase = 'diving';
   e.hasShotStorm = false;
+  const limitY = CONFIG.player.baseY + CONFIG.enemyMarch.stormTriggerOffset - cfg.diveDepthPadding;
+  const targetX = state.player.x + state.player.w / 2 - e.w / 2 + (Math.random() - 0.5) * 60;
+  e.diveTargetX = Math.max(20, Math.min(CONFIG.canvasW - 20 - e.w, targetX));
+  e.diveTargetY = limitY;
 }
 
-// Actualiza una abeja que ya está en modo "enjambre", a través de sus
-// fases: 'scatter' (se va al costado y desaparece de pantalla), y luego,
-// según el movimiento vigente del ciclo (ver updateStormMacro):
-//   'circle'   — vuela en círculo alrededor de un centro, disparando
-//                (el disparo real lo maneja el reloj compartido de
-//                updateStormMacro, acá solo se mueve).
-//   'sweepWait'/'sweep' — espera un poco y después cruza volando de
-//                izquierda a derecha en su fila, disparando de a poco.
-//   'queued'/'dive' — el sistema de picada de siempre: espera oculta y
-//                cae rápido de a 2 o 3 cuando le toca el turno.
+// Actualiza una abeja del enjambre, siempre dentro de UN solo
+// comportamiento continuo (nada de desapariciones ni fases sueltas):
+//   'joining'  — vuela derecho hacia su lugar en el enjambre.
+//   'circle'   — orbita tranquila en su propio circulito alrededor de
+//                ese lugar (disparo real lo maneja updateSwarm).
+//   'diving'   — se despegó y baja picando hacia el límite (punta del
+//                avión), dispara una vez al llegar.
+//   'returning'— vuelve derecho a su lugar en el enjambre y retoma 'circle'.
 function updateStormEnemy(e, dt) {
-  const cfg = CONFIG.stormDive;
-  const mc = CONFIG.stormMacro;
+  const cfg = CONFIG.swarm;
 
-  if (e.stormPhase === 'scatter') {
-    e.x += e.scatterDir * e.scatterSpeed * dt;
-    const offLeft = e.x + e.w < -10;
-    const offRight = e.x > CONFIG.canvasW + 10;
-    if (offLeft || offRight) {
-      // Termina de dispersarse: se acomoda en el movimiento que esté
-      // vigente ahora mismo (si por algún motivo todavía no hay uno
-      // asignado, arranca por 'circle', el primero del ciclo).
-      initStormSubPhase(e, state.stormMacroPhase || 'circle');
+  // Punto de "reposo" del enjambre en este instante: el circulito propio
+  // sigue girando incluso mientras la abeja está picando o volviendo, así
+  // el regreso apunta siempre a un lugar vivo, no a uno fijo.
+  e.circleAngle += e.circleAngularSpeed * dt;
+  const restX = e.anchorX + Math.cos(e.circleAngle) * e.circleRadius - e.w / 2;
+  const restY = e.anchorY + Math.sin(e.circleAngle) * e.circleRadius * 0.6 - e.h / 2;
+
+  if (e.stormPhase === 'joining') {
+    const dx = restX - e.x;
+    const dy = restY - e.y;
+    const dist = Math.hypot(dx, dy);
+    const step = cfg.joinSpeed * dt;
+    if (dist <= step) {
+      e.x = restX;
+      e.y = restY;
+      e.stormPhase = 'circle';
+    } else {
+      e.x += (dx / dist) * step;
+      e.y += (dy / dist) * step;
     }
   } else if (e.stormPhase === 'circle') {
-    e.circleAngle += e.circleAngularSpeed * dt;
-    e.x = e.circleCenterX + Math.cos(e.circleAngle) * e.circleRadius - e.w / 2;
-    e.y = e.circleCenterY + Math.sin(e.circleAngle) * e.circleRadius * 0.6;
-  } else if (e.stormPhase === 'sweepWait') {
-    e.sweepDelay -= dt;
-    if (e.sweepDelay <= 0) {
-      e.stormPhase = 'sweep';
-    }
-  } else if (e.stormPhase === 'sweep') {
-    e.x += mc.sweepSpeed * dt;
-    e.stormShotTimer -= dt;
-    if (e.stormShotTimer <= 0) {
-      state.enemyBullets.push({
-        x: e.x + e.w / 2 - CONFIG.enemyBullet.width / 2,
-        y: e.y + e.h,
-        w: CONFIG.enemyBullet.width,
-        h: CONFIG.enemyBullet.height,
-        ...aimedBulletVelocity(e.x + e.w / 2, e.y + e.h),
-      });
-      e.stormShotTimer = mc.sweepShotMin + Math.random() * (mc.sweepShotMax - mc.sweepShotMin);
-    }
-    if (e.x > CONFIG.canvasW + 30) {
-      // Termina de cruzar: vuelve a entrar por la izquierda, en su misma
-      // fila, y sigue así mientras dure el movimiento de barrido.
-      e.x = -30 - Math.random() * 150;
-      e.y = 40 + e.sweepRow * 26 + Math.random() * 8;
-    }
-  } else if (e.stormPhase === 'queued') {
-    // No hace nada: el manager (updateStormReleases) la elige cuando
-    // hace falta rellenar el cupo de 2-3 que están cayendo.
-  } else if (e.stormPhase === 'dive') {
-    e.stormT += dt;
-    const speed = cfg.diveSpeed * (state.stormSpeedBoost ? cfg.speedBoostMultiplier : 1);
-    e.y += speed * dt;
-    e.x += e.stormVX * dt;
+    e.x = restX;
+    e.y = restY;
+  } else if (e.stormPhase === 'diving') {
+    const dx = e.diveTargetX - e.x;
+    const dy = e.diveTargetY - e.y;
+    const dist = Math.hypot(dx, dy);
+    const step = cfg.diveSpeed * dt;
 
-    if (!e.hasShotStorm && e.stormT > 0.2) {
+    if (!e.hasShotStorm) {
       state.enemyBullets.push({
         x: e.x + e.w / 2 - CONFIG.enemyBullet.width / 2,
         y: e.y + e.h,
@@ -1469,11 +1397,26 @@ function updateStormEnemy(e, dt) {
       e.hasShotStorm = true;
     }
 
-    if (e.y > CONFIG.canvasH + 30) {
-      // Vuelve a la cola, esperando su turno de nuevo (se mantiene la
-      // misma cantidad de abejas de siempre, siguen bajando sin parar).
-      e.stormPhase = 'queued';
-      e.y = -9999;
+    if (dist <= step) {
+      e.x = e.diveTargetX;
+      e.y = e.diveTargetY;
+      e.stormPhase = 'returning';
+    } else {
+      e.x += (dx / dist) * step;
+      e.y += (dy / dist) * step;
+    }
+  } else if (e.stormPhase === 'returning') {
+    const dx = restX - e.x;
+    const dy = restY - e.y;
+    const dist = Math.hypot(dx, dy);
+    const step = cfg.diveReturnSpeed * dt;
+    if (dist <= step) {
+      e.x = restX;
+      e.y = restY;
+      e.stormPhase = 'circle';
+    } else {
+      e.x += (dx / dist) * step;
+      e.y += (dy / dist) * step;
     }
   }
 }
@@ -1585,8 +1528,7 @@ function aimedBulletVelocity(fromX, fromY) {
 function updateEnemies(dt) {
   const f = state.formation;
   updateDiveWaves(dt);
-  updateStormMacro(dt);
-  updateStormReleases(dt);
+  updateSwarm(dt);
 
   for (const e of state.enemies) {
     if (!e.alive) continue;
@@ -1788,24 +1730,34 @@ function fillTauntTemplate(template, name) {
 
 function pickBossTauntFallback(phase) {
   const list = BOSS_TAUNT_FALLBACKS[phase] || BOSS_TAUNT_FALLBACKS.appear;
-  const template = list[Math.floor(Math.random() * list.length)];
   const name = currentPlayerName || 'PILOTO';
-  return fillTauntTemplate(template, name);
+  // Preferimos una plantilla que todavía no se haya mostrado (comparando
+  // ya con el nombre puesto, porque {name} varía). Si ya se usaron
+  // todas (lista chica y pelea muy larga), no queda otra que repetir.
+  const filled = list.map(t => fillTauntTemplate(t, name));
+  const fresh = filled.filter(f => !recentBossTaunts.includes(f));
+  const pool = fresh.length > 0 ? fresh : filled;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // Pide una frase de provocación del jefe (texto, sin voz) para
 // mostrar en pantalla mientras se sigue jugando: no pausa nada, no
 // agrega tiempo de partida. Muestra al toque una frase de reserva
 // (siempre en español, siempre sobre el juego) y, si la IA contesta a
-// tiempo con algo válido, la reemplaza por la generada.
+// tiempo con algo válido, la reemplaza por la generada. Además lleva
+// un historial de las últimas frases ya mostradas (recentBossTaunts) y
+// se lo manda al servidor, para que la IA nunca repita una que ya vimos.
 function requestBossTaunt(phase) {
   if (!state || !state.bossPhase) return;
   const kind = phase === 'laughcaps' ? 'laughcaps' : 'normal';
-  state.bossTaunt.text = pickBossTauntFallback(phase);
+  const fallbackLine = pickBossTauntFallback(phase);
+  state.bossTaunt.text = fallbackLine;
   state.bossTaunt.timer = CONFIG.boss.tauntDuration;
   state.bossTaunt.kind = kind;
+  pushRecent(recentBossTaunts, fallbackLine);
 
   const scoreAtRequest = state.score;
+  const recentTauntsSnapshot = recentBossTaunts.slice();
   (async () => {
     try {
       const controller = new AbortController();
@@ -1813,7 +1765,12 @@ function requestBossTaunt(phase) {
       const res = await fetch('/api/boss-taunt', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ phase, score: scoreAtRequest, playerName: currentPlayerName }),
+        body: JSON.stringify({
+          phase,
+          score: scoreAtRequest,
+          playerName: currentPlayerName,
+          recentTaunts: recentTauntsSnapshot,
+        }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -1828,6 +1785,11 @@ function requestBossTaunt(phase) {
         state.bossTaunt.text = taunt;
         state.bossTaunt.timer = CONFIG.boss.tauntDuration;
         state.bossTaunt.kind = kind;
+        // Reemplazamos el registro del fallback por la frase real que
+        // terminó mostrándose, para que el anti-repetición sea preciso.
+        const idx = recentBossTaunts.lastIndexOf(fallbackLine);
+        if (idx !== -1) recentBossTaunts[idx] = taunt;
+        else pushRecent(recentBossTaunts, taunt);
       }
     } catch (err) {
       // silencioso a propósito: ya se ve la frase de reserva, nunca
@@ -2469,13 +2431,15 @@ async function requestAiGameOverComment(stats) {
   aiCommentEl.classList.add('ai-comment--visible');
   aiTitleEl.textContent = `Título obtenido: ${fallback.title}`;
   aiTitleEl.classList.add('ai-comment--visible');
+  pushRecent(recentGameoverTitles, fallback.title);
+  const recentTitlesSnapshot = recentGameoverTitles.slice();
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
     const res = await fetch('/api/gameover-message', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(stats),
+      body: JSON.stringify({ ...stats, recentTitles: recentTitlesSnapshot }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -2491,6 +2455,9 @@ async function requestAiGameOverComment(stats) {
     // reserva que ya se está mostrando (nunca en blanco, nunca en inglés).
     if (data && data.title && looksSpanish(data.title)) {
       aiTitleEl.textContent = `Título obtenido: ${data.title}`;
+      const idx = recentGameoverTitles.lastIndexOf(fallback.title);
+      if (idx !== -1) recentGameoverTitles[idx] = data.title;
+      else pushRecent(recentGameoverTitles, data.title);
     }
   } catch (err) {
     // silencioso a propósito: ya se ve el comentario/título de reserva

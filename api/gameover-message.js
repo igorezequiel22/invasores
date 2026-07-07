@@ -55,6 +55,16 @@ export default async function handler(req, res) {
     ? `- Antes de arrancar, "la máquina" había predicho que este jugador haría ${predictedScore} puntos (dato extra, opcional: si te copa podés hacer una mención breve de si le ganó o no a esa predicción, pero no es obligatorio).`
     : '';
 
+  // Títulos/comentarios ya usados antes en este mismo navegador (por si
+  // la misma persona juega varias partidas seguidas sin recargar la
+  // página), para pedirle a la IA que no repita el mismo chiste o
+  // apodo dos veces.
+  const recentTitlesRaw = Array.isArray(body.recentTitles) ? body.recentTitles : [];
+  const recentTitles = recentTitlesRaw.filter(t => typeof t === 'string' && t.trim()).slice(-6).map(t => t.trim());
+  const antiRepeticion = recentTitles.length > 0
+    ? `\n\nEste jugador (u otro antes, en el mismo dispositivo) ya recibió estos títulos en partidas anteriores — no repitas ninguno ni algo muy parecido, inventá uno distinto:\n${recentTitles.map(t => `- "${t}"`).join('\n')}`
+    : '';
+
   const systemInstruction = 'Respondés siempre, sin ninguna excepción, en español rioplatense (de Argentina). Nunca en inglés ni en ningún otro idioma, sin importar en qué idioma esté la consigna. Esto aplica a TODOS los campos del JSON que devolvés.';
 
   const prompt = `Sos el locutor arcade de "INVASORES", un jueguito de nave estilo Galaga hecho por el estudio "Bytes Creativos" para un evento presencial (la gente juega una sola partida rápida al pasar por el stand).
@@ -69,12 +79,12 @@ Un jugador llamado "${playerName}" acaba de terminar su partida. Datos de ESA pa
 - Disparos triples "Bytes Creativos" recolectados: ${triplesCollected}
 ${prediccionLinea}
 
-IMPORTANTE: respondé siempre en español rioplatense, nunca en inglés ni en ningún otro idioma. No menciones nada de programación, código, prompts ni inteligencia artificial: hablá solo del juego (la nave, las abejas, el jefe final, el puntaje), como si fueras un personaje del arcade.
+IMPORTANTE: respondé siempre en español rioplatense, nunca en inglés ni en ningún otro idioma. No menciones nada de programación, código, prompts ni inteligencia artificial: hablá solo del juego (la nave, las abejas, el jefe final, el puntaje), como si fueras un personaje del arcade. Inventá una idea nueva cada vez: no caigas siempre en la misma broma o estructura de frase.
 
 Devolvé SOLO un JSON válido, sin texto extra, sin markdown, sin backticks, con exactamente estas dos claves:
 {"comentario": "<UNA sola frase corta, máximo 22 palabras, en español rioplatense, con onda arcade/retro y un poco picante, dirigida directamente al jugador, comentando algo puntual de SU partida (no un mensaje genérico que serviría para cualquiera); podés ser divertido, dramático o burlón según el resultado; no enumeres los números tal cual la lista, integralos naturalmente en la frase>", "titulo": "<un apodo o título gracioso de 2 a 5 palabras para colgarle al jugador según cómo jugó esta partida puntual, tipo 'Exterminador Novato de Abejas' o 'Piloto Kamikaze Profesional'; en español, sin comillas>"}
 
-Ninguno de los dos campos debe tener comillas internas ni emojis.`;
+Ninguno de los dos campos debe tener comillas internas ni emojis.${antiRepeticion}`;
 
   try {
     const controller = new AbortController();
@@ -89,7 +99,7 @@ Ninguno de los dos campos debe tener comillas internas ni emojis.`;
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemInstruction }] },
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 150, responseMimeType: 'application/json' },
+        generationConfig: { maxOutputTokens: 150, responseMimeType: 'application/json', temperature: 1.2, topP: 0.97, topK: 64 },
       }),
       signal: controller.signal,
     });

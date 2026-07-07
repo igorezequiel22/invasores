@@ -27,6 +27,14 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const playerNameRaw = typeof body.playerName === 'string' ? body.playerName : 'PILOTO';
   const playerName = playerNameRaw.slice(0, 20);
+  // Frases ya usadas antes en este mismo navegador (si varias personas
+  // juegan seguido en el mismo dispositivo sin recargar), para pedirle
+  // a la IA que no repita siempre la misma idea.
+  const recentLinesRaw = Array.isArray(body.recentLines) ? body.recentLines : [];
+  const recentLines = recentLinesRaw.filter(t => typeof t === 'string' && t.trim()).slice(-6).map(t => t.trim());
+  const antiRepeticion = recentLines.length > 0
+    ? `\n\nYa se usaron estas frases antes en este mismo dispositivo — no repitas ninguna ni algo muy parecido, inventá una idea distinta:\n${recentLines.map(t => `- "${t}"`).join('\n')}`
+    : '';
 
   const systemInstruction = 'Respondés siempre, sin ninguna excepción, en español rioplatense (de Argentina). Nunca en inglés ni en ningún otro idioma, sin importar en qué idioma esté la consigna. Esto aplica a TODOS los campos del JSON que devolvés.';
 
@@ -37,7 +45,7 @@ El jugador que está por arrancar se llama "${playerName}". Todavía no jugó na
 Devolvé SOLO un JSON válido, sin texto extra, sin markdown, sin backticks, con exactamente estas dos claves:
 {"predictedScore": <número entero entre 800 y 6000, en onda arcade>, "line": "<una frase cortita, máximo 18 palabras, en español rioplatense, con onda arcade/retro, retadora, dirigida a ${playerName}, que mencione ese mismo número de puntos predichos>"}
 
-El campo "line" tiene que integrar el número de predictedScore de forma natural (por ejemplo con la idea de "la máquina cree que vas a hacer X puntos"). SIEMPRE en español rioplatense, nunca en inglés ni en ningún otro idioma. No menciones programación, código ni inteligencia artificial: hablá solo del juego y del puntaje. No uses comillas dentro del texto de "line" ni emojis.`;
+El campo "line" tiene que integrar el número de predictedScore de forma natural (por ejemplo con la idea de "la máquina cree que vas a hacer X puntos"). SIEMPRE en español rioplatense, nunca en inglés ni en ningún otro idioma. No menciones programación, código ni inteligencia artificial: hablá solo del juego y del puntaje. No uses comillas dentro del texto de "line" ni emojis. Inventá una idea nueva cada vez, variando la estructura de la frase (no caigas siempre en la misma fórmula).${antiRepeticion}`;
 
   try {
     const controller = new AbortController();
@@ -52,7 +60,7 @@ El campo "line" tiene que integrar el número de predictedScore de forma natural
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemInstruction }] },
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 120, responseMimeType: 'application/json' },
+        generationConfig: { maxOutputTokens: 120, responseMimeType: 'application/json', temperature: 1.2, topP: 0.97, topK: 64 },
       }),
       signal: controller.signal,
     });
