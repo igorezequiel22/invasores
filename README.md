@@ -1,47 +1,39 @@
 <div align="center">
+  <img src="https://files.catbox.moe/z209a2.png" alt="Invasores Logo" width="460"/>
 
-<img src="images/bytes_creativos_logo.png" width="120" alt="Bytes Creativos">
 
-#  INVASORS
+  ### Arcade Shoot 'Em Up inspirado en los clásicos, con puntuaciones online y comentarios generados por IA.
 
-### Arcade Shoot 'Em Up inspirado en los clásicos.
+  [![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white)](https://developer.mozilla.org/docs/Web/HTML)
+  [![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white)](https://developer.mozilla.org/docs/Web/CSS)
+  [![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
+  [![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
+  [![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://vercel.com)
+  [![AI](https://img.shields.io/badge/AI%20Powered-6E56CF?style=for-the-badge&logo=openai&logoColor=white)](#)
 
-![HTML5](https://img.shields.io/badge/HTML5-orange?style=for-the-badge&logo=html5&logoColor=white)
-![CSS3](https://img.shields.io/badge/CSS3-blue?style=for-the-badge&logo=css3&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-yellow?style=for-the-badge&logo=javascript&logoColor=black)
+  [**▶ Jugar ahora**](https://invasores-nine.vercel.app/)
 
 </div>
 
 ---
 
-##  Descripción
+## Descripción
 
-INVASORS es un videojuego arcade desarrollado con **HTML, CSS y JavaScript**, inspirado en los clásicos Shoot 'Em Up. Controla tu nave, derrota oleadas de enemigos y consigue la mayor puntuación posible.
+**Invasores** es un videojuego arcade *Shoot 'Em Up* desarrollado en **HTML, CSS y JavaScript puro**, con estética pixel art inspirada en los clásicos del género. Controlá tu nave, derrotá oleadas de enemigos, sumá power-ups y competí por el primer puesto en una tabla de puntuaciones global.
 
-##  Características
+Al finalizar cada partida, una **IA analiza tu desempeño y genera un comentario personalizado**, y tu score queda registrado en tiempo real gracias a **Supabase**.
 
-- Estilo Pixel Art
-- Enemigos inspirados en los clásicos arcade
-- Power-Ups
-- Sistema de puntuación
-- Compatible con dispositivos móviles
+## Características
 
-## 🛠 Tecnologías
+- Estilo **pixel art** con enemigos inspirados en el arcade clásico
+- Sistema de **power-ups** y dificultad progresiva
+- **Leaderboard online** con puntuaciones persistentes (Supabase)
+- **Comentario final generado por IA** según el rendimiento del jugador
+- Totalmente **responsive**, jugable en dispositivos móviles
 
-- HTML5
-- CSS3
-- JavaScript
+## Tecnologías
 
-## ▶️ Ejecutar
-
-Clona el repositorio y abre `index.html` en tu navegador.
-
-```bash
-git clone https://github.com/igorezequiel22/invasors.git
-```
-
----
-
-<div align="center">
-
-</div>
+| Frontend | Backend / Datos | Infraestructura |
+|:---:|:---:|:---:|
+| HTML5, CSS3, JavaScript (Vanilla) | Supabase (PostgreSQL + API REST) | Vercel |
+| | API serverless (`/api`) para IA | |
