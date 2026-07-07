@@ -1441,19 +1441,22 @@ function updateEnemies(dt) {
         e.secondShot = true;
       }
 
-      // Las abejas grandes bajan hasta muy cerca del jugador (más peligrosas)
-      // o tocan el suelo: van a órbita
+      // Las abejas grandes bajan hasta muy cerca del jugador y vuelven a
+      // la formación (comportamiento normal de ataque). SOLO se suman al
+      // modo enjambre si la formación COMPLETA ya lo activó (bandera
+      // global state.formationToStorm, seteada en updateFormation cuando
+      // la primera fila llega a la altura del avión) — nunca por su
+      // propia posición individual durante una picada de ataque suelta.
       let shouldReturn = false;
       if (e.type === 'g') {
-        if (e.y > state.player.y - 20) {
-          shouldReturn = true;
-        }
-        if (e.y > CONFIG.canvasH - 40) {
-          // Toca el suelo: pasa al modo enjambre (dispersión + picada
-          // continua) en vez de quedarse girando en el centro.
+        if (state.formationToStorm) {
+          // El enjambre ya arrancó para todo el grupo: esta abeja se
+          // suma también en vez de volver a una formación que ya no existe.
           e.diving = false;
           enterStormMode(e);
           shouldReturn = false;
+        } else if (e.y > state.player.y - 20) {
+          shouldReturn = true;
         }
       } else {
         if (e.y > CONFIG.canvasH + 20) {
@@ -1476,12 +1479,13 @@ function updateEnemies(dt) {
       }
     } else if (e.returning) {
       // --- REGRESO: vuela desde arriba hasta reinsertarse en su lugar
-      // exacto dentro del grupo, O a órbita si la formación ya toca el suelo ---
+      // exacto dentro del grupo, O se suma al enjambre si la formación
+      // COMPLETA ya lo activó (misma bandera global que usan las demás,
+      // así todas se van juntas y no cada una según su propia fila) ---
       const targetX = e.baseX + f.offsetX;
       const targetY = e.baseY + f.offsetY;
       
-      // Si la formación toca el suelo, ir a órbita en lugar de volver a formación
-      if (targetY > CONFIG.canvasH - 40) {
+      if (state.formationToStorm) {
         e.returning = false;
         enterStormMode(e);
       } else {
