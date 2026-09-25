@@ -400,7 +400,7 @@ function renderHighScoreSidebar() {
   const list = loadHighScores();
   highscoreListEl.innerHTML = '';
   if (list.length === 0) {
-    highscoreListEl.innerHTML = '<li class="hs-empty">Sin puntajes<br>todavía</li>';
+    highscoreListEl.innerHTML = '<li class="hs-empty">Base de datos pausada<br>momentáneamente</li>';
   } else {
     list.forEach((entry, i) => {
       const li = document.createElement('li');
